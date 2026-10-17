@@ -1,5 +1,7 @@
 # LG Smart Home Agent
 
+![tests](https://github.com/tbrobo99/lg-home-agent/actions/workflows/tests.yml/badge.svg)
+
 A conversational agent for a whole-home LG appliance setup. You talk to it in plain
 English, and it both acts immediately and schedules future actions — *"turn off the
 living room AC every night at 11 pm"* becomes a durable task that actually fires.
