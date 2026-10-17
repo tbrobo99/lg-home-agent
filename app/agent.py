@@ -1,10 +1,15 @@
 """Agent loop: understand -> decide -> execute -> reply.
 
-Two boundaries matter here:
+Three boundaries matter here:
 
-1. Execution stays in deterministic code. The LLM only translates language into
-   a structured intent; it never touches a device.
-2. Understanding is stateful. A request that is missing a slot ("it's stuffy")
+1. Execution stays in deterministic code. When the rules or a single LLM pass
+   produce an intent, `_execute` applies it — a model's job stops at naming an
+   intent. Only tier 3 (`agent_loop`) may act, and only through `tools.ToolBox`,
+   which validates every argument.
+2. Model tiers are chosen by what the request *is*, not by what the model says
+   about itself — see `_escalate`. A blind single pass is cheap and cannot see
+   device state, so it only gets literal commands; goals get the loop.
+3. Understanding is stateful. A request that is missing a slot ("it's stuffy")
    is remembered and completed by the next turn instead of being thrown away —
    see `_complete_pending`.
 """
@@ -13,7 +18,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
-from . import db, llm, nlu
+from . import agent_loop, db, llm, nlu
 from .devices.base import FAN_LABELS, MODE_LABELS, describe_action
 
 # how long a half-finished request stays open
@@ -21,6 +26,24 @@ PENDING_TTL = 120
 
 CANCEL_PENDING_RE = re.compile(
     r"\b(cancel|never\s*mind|forget\s*it|nothing|drop\s*it)\b", re.I)
+
+# Tier 2's schema holds exactly one device and a flat action list, so a request
+# about the home as a whole cannot survive it: it would pick one device, act on
+# that, and report success. Those belong to the loop, which can loop.
+WHOLE_HOME_RE = re.compile(
+    r"\b(?:everything|all|both|whole|entire|house|home|flat|every\s+room)\b",
+    re.I)
+
+# A blind pass earns its round trip only when the user named a value to set:
+# then the one open question is *which* device, and a device list answers it.
+# "put the fridge at 3" is checkable; "the fridge is too warm" is a judgement
+# about the world, and only the loop can look at the world.
+SETTING_RE = re.compile(
+    r"\b(?:1[6-9]|2[0-9]|30)\b(?!\s*(?:min|minute|hour|hr|sec|am|pm|:))"
+    r"|\b(?:on|off)\b"
+    r"|\b(?:cool|cooling|heat|heating|dry|dehumidify|fan|auto)\b"
+    r"|\b(?:low|mid|medium|high)\b",
+    re.I)
 
 
 class Agent:
@@ -31,6 +54,8 @@ class Agent:
         self._last_device_id: str | None = None
         # a request waiting for a missing slot
         self._pending: dict | None = None
+        # the tool loop asked a question; keep its transcript to resume from
+        self._loop_ctx: dict | None = None
 
     # ------------------------------------------------ entry point
 
@@ -43,6 +68,18 @@ class Agent:
         if self._last_device_id:
             fallback = next((d for d in devices if d["id"] == self._last_device_id), None)
 
+        # which tier answers is recorded, not inferred: a tier 2 plan carries the
+        # same intent names as the rules, so `intent_name` cannot tell them apart
+        tier = "rules"
+
+        # 0. an answer to a question the tool loop asked last turn
+        prior = self._resume_loop(text, devices, default_room, fallback, now)
+        if prior is not None:
+            loop = agent_loop.run(self.cfg, text, self.adapter, now,
+                                  default_room, prior=prior)
+            if loop.get("handled"):
+                return self._finish_loop(loop, text, now)
+
         # 1. finish what we were asking about, if anything
         intent = self._complete_pending(text, devices, default_room, now)
 
@@ -50,12 +87,14 @@ class Agent:
         if intent is None:
             intent = nlu.parse(text, devices, now, default_room, fallback)
 
-            # Rules first. Only hand the long tail to the LLM.
-            if intent["intent"] == "unknown" and llm.available(self.cfg):
-                alt = llm.plan(self.cfg, text, devices, now, default_room)
-                if alt and alt["intent"] != "unknown":
-                    alt["clarify"] = alt.get("clarify") or intent.get("clarify")
-                    intent = alt
+            # Rules first. Whatever they could not finish goes to a model, and
+            # which model it goes to is decided before any call is made.
+            escalated = self._escalate(text, intent, devices, default_room, now)
+            if escalated is not None:
+                if escalated.get("handled"):     # the tool loop answered
+                    return self._finish_loop(escalated, text, now)
+                intent = escalated               # tier 2 replaced the parse
+                tier = "llm"
 
             # remember a request that is only missing one slot
             if intent["intent"].startswith("need_"):
@@ -67,7 +106,10 @@ class Agent:
 
         result = self._execute(intent, now)
         result["intent_name"] = intent["intent"]
+        result["tier"] = tier
         result["raw_text"] = text
+
+        self._loop_ctx = None  # a parsed command ends any open loop thread
 
         targets = self._targets(intent)
         if targets:
@@ -77,6 +119,118 @@ class Agent:
         db.add_message("assistant", result["reply"], {
             "intent": intent["intent"],
             "actions": result.get("actions") or [],
+        })
+        return result
+
+    # ------------------------------------------------ tool loop
+
+    def _escalate(self, text: str, intent: dict, devices: list[dict],
+                  default_room: str, now: datetime) -> dict | None:
+        """Hand a request the rules could not finish to a model.
+
+        Returns a loop result (key "handled") or a replacement intent, or None
+        to keep what the rules produced.
+
+        The order between the two model tiers is the point of this method, and
+        it is decided from the request, not from the model's self-assessment.
+
+        Tier 2 is one JSON round trip: ~2 s, and blind. It sees the message and
+        a device list — never a device's state — and its schema holds one device
+        and a flat action list. That makes it trustworthy in exactly one case:
+        the user named a value to set ("put the fridge at 3"). The only open
+        question is then *which* device, and a device list answers that.
+
+        Tier 3 is a bounded tool loop: ~10 s, and it can read state, act on
+        several devices, and ask. It is the only tier that can answer a symptom
+        ("the bedroom is a sauna"), because the right action there depends on a
+        temperature that neither the rules nor a blind pass can see.
+
+        So a literal command gets the cheap guess; a goal gets the loop.
+        """
+        if not llm.available(self.cfg):
+            return None
+
+        kind = intent["intent"]
+
+        if kind == "unknown" and SETTING_RE.search(text) \
+                and not WHOLE_HOME_RE.search(text):
+            alt = llm.plan(self.cfg, text, devices, now, default_room)
+            if alt and self._complete(alt):
+                alt["clarify"] = alt.get("clarify") or intent.get("clarify")
+                return alt
+
+        # `need_*` is a half-parsed request: the rules found a target but no
+        # action, or an action but no target. Asking the user is the last
+        # resort, not the first — a loop that can read state often resolves it
+        # without a question, and when it does need one the question is better
+        # than "Could you be more specific?".
+        if kind == "unknown" or kind.startswith("need_"):
+            loop = agent_loop.run(self.cfg, text, self.adapter, now, default_room)
+            if loop.get("handled"):
+                return loop
+
+        return None
+
+    @staticmethod
+    def _complete(it: dict) -> bool:
+        """Is tier 2's plan executable without guessing anything?
+
+        A plan that names an intent but leaves a device or an action empty is
+        not a cheap answer — it is a cheap answer *plus* a guess, and the guess
+        is exactly the part the loop would do better.
+        """
+        kind = it["intent"]
+        if kind in ("control", "schedule"):
+            return bool(it.get("device_id")) and bool(it.get("actions"))
+        if kind == "query":
+            return bool(it.get("device_id"))
+        return kind in ("cancel", "list")
+
+    def _resume_loop(self, text: str, devices: list[dict], default_room: str,
+                     fallback: dict | None, now: datetime) -> list[dict] | None:
+        """Transcript to resume, when this message answers a loop's question.
+
+        A message that is itself a complete command is not an answer, so the
+        thread is dropped instead of hijacked.
+        """
+        ctx = self._loop_ctx
+        self._loop_ctx = None
+        if not ctx or now > ctx["expires"]:
+            return None
+        probe = nlu.parse(text, devices, now, default_room, fallback)
+        if probe["intent"] in ("control", "schedule", "query", "list", "cancel"):
+            return None
+        return ctx["messages"]
+
+    def _finish_loop(self, loop: dict, text: str, now: datetime) -> dict:
+        """Record and return a turn that the tool loop handled itself."""
+        if loop.get("awaiting") and loop.get("messages"):
+            # Remember the exchange so the user's answer resumes it instead of
+            # starting over — a loop that asks and then forgets is worse than
+            # one that never asks.
+            self._loop_ctx = {
+                "messages": loop["messages"],
+                "expires": now + timedelta(seconds=PENDING_TTL),
+            }
+
+        result = {
+            "reply": loop["reply"],
+            "ok": bool(loop.get("ok")),
+            "actions": loop.get("actions") or [],
+            "intent_name": "agent_loop",
+            "tier": "loop",
+            "raw_text": text,
+            "steps": loop.get("steps"),
+        }
+        targets = loop.get("targets") or []
+        if targets:
+            self._last_device_id = targets[0]["id"]
+
+        db.add_message("user", text, {"intent": "agent_loop"})
+        db.add_message("assistant", result["reply"], {
+            "intent": "agent_loop",
+            "actions": result["actions"],
+            "steps": result["steps"],
         })
         return result
 
@@ -150,6 +304,8 @@ class Agent:
         if kind == "dropped":
             return {"reply": it.get("clarify") or "Okay.", "ok": True, "actions": []}
         if kind.startswith("need_"):
+            # Reached only when no model is available or the loop gave up, so
+            # the canned question is the honest floor, not the design.
             return {"reply": it.get("clarify") or "Could you be more specific?",
                     "ok": False, "actions": [], "awaiting": it.get("missing")}
         return {

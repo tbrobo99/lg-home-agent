@@ -65,23 +65,39 @@ def _device_brief(devices: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _call(cfg: dict, messages: list[dict]) -> str:
+def chat(cfg: dict, messages: list[dict], tools: list[dict] | None = None,
+         json_mode: bool = False, temperature: float = 0.1,
+         max_tokens: int = 600) -> dict:
+    """One round trip. Returns the assistant message dict unchanged.
+
+    `tools` turns this into the agent-loop call: no JSON mode, and the reply may
+    carry `tool_calls` instead of content.
+    """
     llm = cfg["llm"]
     url = (llm.get("base_url") or "").rstrip("/") + "/chat/completions"
-    body = json.dumps({
+    payload = {
         "model": llm.get("model"),
         "messages": messages,
-        "temperature": 0.1,
-        "max_tokens": 600,
-        "response_format": {"type": "json_object"},
-    }).encode("utf-8")
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST", headers={
         "Content-Type": "application/json",
         "Authorization": f"Bearer {llm.get('api_key')}",
     })
     with urllib.request.urlopen(req, timeout=float(llm.get("timeout", 20))) as resp:
         data = json.loads(resp.read().decode("utf-8"))
-    return data["choices"][0]["message"]["content"]
+    return data["choices"][0]["message"]
+
+
+def _call(cfg: dict, messages: list[dict]) -> str:
+    return chat(cfg, messages, json_mode=True).get("content") or ""
 
 
 def _validate(raw: dict, devices: list[dict], now: datetime) -> dict | None:
