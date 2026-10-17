@@ -1,0 +1,12 @@
+{
+  "appId": "com.example.homeagent",
+  "appName": "Home Agent",
+  "webDir": "app/web",
+  "server": {
+    "url": "http://192.168.1.1:8848",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

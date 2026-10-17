@@ -231,7 +231,10 @@ lg-home-agent/
 │   └── run.py              accuracy per category, `--min` for CI
 ├── tools/
 │   ├── thinq_check.py      ThinQ calibration helper
-│   └── icon-source.html    renders the app icons
+│   ├── make_icons.py       renders every icon and splash screen
+│   └── icon-*.html         icon sources
+├── android/                Capacitor project (npm run sync, then build an APK)
+├── capacitor.config.json   app id, name, and the host the WebView loads
 ├── docs/
 │   ├── APP.md              PWA install, Capacitor APK build
 │   ├── DEPLOY.md           always-on deployment, campus network notes

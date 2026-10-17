@@ -65,16 +65,25 @@ Capacitor wraps the same files in a WebView. This is optional — the PWA alread
 installs to the home screen — but it gives you a real APK to hand in, and it lets
 the app talk to a fixed address without typing a URL.
 
+The native project is already generated and committed under `android/`
+(Capacitor 8, Gradle 8.14, `com.example.homeagent`). `node_modules/` is not.
+
 ```bash
-# once, at the repository root
-npm init -y
-npm i -D @capacitor/cli
-npm i @capacitor/core @capacitor/android
-npx cap init "Home Agent" com.example.homeagent --web-dir=app/web
-npx cap add android
+npm install                 # Capacitor CLI + runtime
+npx cap sync android        # copies app/web into the native project
+npx cap open android        # opens Android Studio: Run, or Build > Build APK
 ```
 
-Then point the WebView at your always-on host (`capacitor.config.json`):
+Or from the command line, with an Android SDK installed and `ANDROID_HOME` set:
+
+```bash
+cd android && ./gradlew assembleDebug
+# android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+### Point it at your agent
+
+`capacitor.config.json` decides where the WebView loads from:
 
 ```json
 {
@@ -88,29 +97,35 @@ Then point the WebView at your always-on host (`capacitor.config.json`):
 }
 ```
 
+Change that `url` to the machine running the agent — the router itself if you run
+it there — then `npx cap sync android` again. `server.url` makes the app a thin
+client, so the phone always sees live state and the scheduler keeps running when
+the phone is asleep. If you would rather ship the shell inside the APK, drop
+`server.url` and store the host in `localStorage` with a settings field instead.
+
+The host is plain HTTP, so the manifest already carries
+`android:usesCleartextTraffic="true"`; without it Android 9+ silently blocks every
+request.
+
+**Not verified here:** the APK build itself. This machine has no Android SDK, so
+the steps above were generated and synced but never compiled. The `android/`
+project is stock Capacitor — the only hand edits are the cleartext flag, the app
+name, and the icons.
+
+## Icons and splash screens
+
+`tools/make_icons.py` renders every icon from the HTML sources next to it, using
+any Chromium-based browser in headless mode:
+
 ```bash
-npx cap sync android
-npx cap open android      # opens Android Studio; Run, or Build > Build APK
+python tools/make_icons.py
 ```
 
-`server.url` makes the app a thin client for the machine that runs the agent, so
-the phone always sees live state and the scheduler keeps running when the phone
-is asleep. If you would rather ship the shell inside the APK, drop `server.url`,
-set the host at runtime instead, and add a settings field that stores it in
-`localStorage`.
-
-Because the host is plain HTTP, Android also needs cleartext traffic allowed —
-`cleartext: true` covers the WebView, and `android/app/src/main/AndroidManifest.xml`
-needs `android:usesCleartextTraffic="true"` on `<application>` for anything else.
-
-## Regenerating the icons
-
-`tools/icon-source.html` renders the icon at any size. With Edge or Chrome:
-
-```bash
-msedge --headless=new --window-size=512,512 \
-       --screenshot=app/web/icon-512.png tools/icon-source.html
-```
+It writes the two PWA icons, the five launcher densities (legacy, round and
+adaptive foreground), and the ten splash screens. Set `BROWSER=/path/to/chrome`
+if the lookup misses yours. Note that `--window-size` does not size the viewport
+in current headless builds, so the script pins the document to the target box
+instead of trusting it.
 
 ## Why no framework
 
