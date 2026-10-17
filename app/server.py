@@ -12,6 +12,16 @@ from . import db
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
+# mimetypes on Windows does not know .webmanifest, and a manifest served as
+# application/octet-stream is silently ignored -- the app then just never
+# becomes installable. Spell the important ones out.
+EXTRA_TYPES = {
+    ".webmanifest": "application/manifest+json",
+    ".svg": "image/svg+xml",
+    ".js": "application/javascript",
+    ".png": "image/png",
+}
+
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "LGHomeAgent/1.1"
@@ -55,7 +65,9 @@ class Handler(BaseHTTPRequestHandler):
         if not path.is_file():
             self._send(404, b"not found", "text/plain")
             return
-        ctype = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+        ctype = (EXTRA_TYPES.get(path.suffix.lower())
+                 or mimetypes.guess_type(str(path))[0]
+                 or "application/octet-stream")
         if ctype.startswith("text/") or ctype == "application/javascript":
             ctype += "; charset=utf-8"
         self._send(200, path.read_bytes(), ctype)

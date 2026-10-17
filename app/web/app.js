@@ -1,280 +1,574 @@
-const $ = (s) => document.querySelector(s);
+"use strict";
+
+const $ = (sel) => document.querySelector(sel);
+
+const ICON = {
+  air_conditioner: "i-ac",
+  air_purifier: "i-purifier",
+  washer: "i-washer",
+  dryer: "i-washer",
+  dish_washer: "i-washer",
+  refrigerator: "i-fridge",
+  water_heater: "i-fridge",
+  dehumidifier: "i-purifier",
+};
+
+const BACKEND_LABEL = { mock: "Simulator", thinq: "LG ThinQ" };
 const MODE_LABEL = { cool: "Cool", heat: "Heat", dry: "Dry", fan: "Fan" };
+const MODES = ["cool", "heat", "dry", "fan"];
 
 let snapshot = null;
-let busy = false;
+let activeRoom = "All";
+let sheetId = null;
+let chipsSig = "";
 
-/* ---------------- helpers ---------------- */
+/* ---------- helpers ---------- */
 
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function esc(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[ch]));
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...(opts || {}),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function findDevice(id) {
+  return snapshot ? (snapshot.devices || []).find((d) => d.id === id) : null;
 }
 
 function fmtWhen(iso) {
   if (!iso) return "—";
-  return iso.replace("T", " ").slice(5, 16);
+  const when = new Date(iso);
+  if (isNaN(when)) return iso;
+  const now = new Date();
+  const time = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (when.toDateString() === now.toDateString()) return `today ${time}`;
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (when.toDateString() === tomorrow.toDateString()) return `tomorrow ${time}`;
+  return `${when.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
-async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  return res.json();
+/** Task summaries come from the NLU layer in sentence case ("turn off the …"). */
+function cap(text) {
+  const s = String(text == null ? "" : text);
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
-/* ---------------- messages ---------------- */
-
-function addMsg(role, text) {
-  const box = $("#messages");
-  const wrap = document.createElement("div");
-  wrap.className = "msg " + role;
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
-  bubble.textContent = text;
-  wrap.appendChild(bubble);
-  box.appendChild(wrap);
-  box.scrollTop = box.scrollHeight;
+/** "every day at 23:00" -> "every day"; the run time is already shown next to it. */
+function repeatShort(label) {
+  const s = String(label || "").trim();
+  if (!/every/i.test(s)) return "once";
+  return s.replace(/\s+at\s+\d{1,2}:\d{2}\s*$/, "").trim();
 }
 
-function showTyping() {
-  const box = $("#messages");
-  const wrap = document.createElement("div");
-  wrap.className = "msg assistant";
-  wrap.id = "typing";
-  wrap.innerHTML = '<div class="bubble typing"><span></span><span></span><span></span></div>';
-  box.appendChild(wrap);
-  box.scrollTop = box.scrollHeight;
+/* ---------- rooms ---------- */
+
+function roomList(devices) {
+  const seen = [];
+  for (const d of devices) {
+    const room = d.room || "";
+    if (room && !seen.includes(room)) seen.push(room);
+  }
+  return ["All", ...seen];
 }
 
-function hideTyping() {
-  const t = $("#typing");
-  if (t) t.remove();
+function visibleDevices() {
+  const all = (snapshot && snapshot.devices) || [];
+  if (activeRoom === "All") return all;
+  return all.filter((d) => (d.room || "") === activeRoom);
 }
 
-/* ---------------- rendering ---------------- */
+function renderRooms() {
+  const list = roomList((snapshot && snapshot.devices) || []);
+  if (!list.includes(activeRoom)) activeRoom = "All";
+  $("#rooms").innerHTML = list.map((room) =>
+    `<button data-room="${esc(room)}" class="${room === activeRoom ? "active" : ""}">${esc(room)}</button>`
+  ).join("");
+}
 
-function renderSnapshot(snap) {
-  if (!snap) return;
-  snapshot = snap;
+/* ---------- summary ---------- */
 
-  const badgeBackend = $("#badgeBackend");
-  const isMock = snap.backend === "mock";
-  badgeBackend.textContent = isMock ? "Simulator" : "LG ThinQ cloud";
-  badgeBackend.className = "badge" + (isMock ? " warn" : "");
+function tile(icon, value, label) {
+  return `<div class="tile">
+    <svg class="tile-icon" viewBox="0 0 24 24"><use href="#${icon}"/></svg>
+    <span class="tile-value">${esc(value)}</span>
+    <span class="tile-label">${esc(label)}</span>
+  </div>`;
+}
 
-  const badgeLLM = $("#badgeLLM");
-  badgeLLM.textContent = snap.llm_enabled ? "LLM assist" : "Rule engine";
-  badgeLLM.className = "badge ghost";
+function renderSummary(devices) {
+  const temps = devices.filter((d) => d.state && d.state.current_temp != null)
+                       .map((d) => d.state.current_temp);
+  const hums = devices.filter((d) => d.state && d.state.humidity != null)
+                      .map((d) => d.state.humidity);
+  const running = devices.filter((d) => d.state && d.state.power).length;
 
-  const online = snap.devices.filter((d) => d.online).length;
-  const scheduled = snap.jobs.filter((j) => j.enabled).length;
-  $("#subtitle").textContent =
-    `${snap.devices.length} devices · ${online} online · ${scheduled} scheduled`;
+  const temp = temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null;
+  const hum = hums.length ? Math.round(hums.reduce((a, b) => a + b, 0) / hums.length) : null;
 
-  renderDevices(snap.devices);
-  renderJobs(snap.jobs);
+  $("#summary").innerHTML = [
+    tile("i-temp", temp == null ? "—" : `${temp.toFixed(1)}°`, "room"),
+    tile("i-drop", hum == null ? "—" : `${hum}%`, "humidity"),
+    tile("i-bolt", `${running}/${devices.length}`, "running"),
+  ].join("");
+}
+
+/* ---------- device grid ---------- */
+
+function cardSub(d) {
+  const st = d.state || {};
+  const on = !!st.power;
+  const room = d.room || "";
+  const withRoom = activeRoom === "All" && room;
+
+  let text;
+  switch (d.type) {
+    case "air_conditioner": {
+      const head = on
+        ? [MODE_LABEL[st.mode] || st.mode || "On",
+           st.target_temp != null ? `${st.target_temp}°C` : ""].filter(Boolean).join(" ")
+        : "Off";
+      text = withRoom
+        ? head
+        : [head, st.current_temp != null ? `room ${st.current_temp}°C` : ""].filter(Boolean).join(" · ");
+      break;
+    }
+    case "air_purifier":
+      text = on ? `PM2.5 ${st.pm25 == null ? "—" : st.pm25}` : "Off";
+      break;
+    case "washer":
+      text = on ? `Washing · ${st.remaining_min == null ? "?" : st.remaining_min} min` : "Standby";
+      break;
+    case "refrigerator":
+      text = `Fridge ${st.fridge_temp == null ? "—" : st.fridge_temp}°C · ` +
+             `Freezer ${st.freezer_temp == null ? "—" : st.freezer_temp}°C`;
+      break;
+    default:
+      text = on ? "On" : "Off";
+  }
+  return withRoom ? `${room} · ${text}` : text;
 }
 
 function renderDevices(devices) {
   const box = $("#devices");
-  $("#devCount").textContent = devices.length;
   if (!devices.length) {
-    box.innerHTML = '<p class="empty">No devices. Check config.json or your LG account.</p>';
+    box.innerHTML = `<p class="empty">Nothing in this room.</p>`;
     return;
   }
 
   box.innerHTML = devices.map((d) => {
     const st = d.state || {};
     const on = !!st.power;
-    const dot = d.online ? (on ? "dot on" : "dot") : "dot offline";
-
-    if (d.type === "air_conditioner") {
-      const cur = st.current_temp != null ? st.current_temp : "—";
-      const target = st.target_temp != null ? st.target_temp : 26;
-      const modes = ["cool", "heat", "dry", "fan"].map((m) =>
-        `<button class="${st.mode === m ? "active" : ""}" data-mode="${m}" data-dev="${d.id}">${MODE_LABEL[m]}</button>`
-      ).join("");
-      return `
-      <div class="dev" data-dev="${d.id}">
-        <div class="dev-top">
-          <span class="${dot}"></span>
-          <span class="dev-name">${esc(d.name)}</span>
-          <span class="dev-room">${esc(d.room || d.type_label || "")}</span>
-        </div>
-        <div class="dev-main">
-          <span class="temp-big">${cur}</span><span class="temp-unit">°C room</span>
-          <span class="dev-sub">${on ? "Running" : "Off"}</span>
-        </div>
-        <div class="stepper">
-          <button data-step="-1" data-dev="${d.id}" ${on ? "" : "disabled"}>−</button>
-          <span class="target">Set ${target}°C</span>
-          <button data-step="1" data-dev="${d.id}" ${on ? "" : "disabled"}>+</button>
-        </div>
-        <div class="modes">${modes}</div>
-        <button class="power ${on ? "on" : ""}" data-power="${d.id}" data-on="${on ? 1 : 0}">
-          ${on ? "Turn off" : "Turn on"}
+    const icon = ICON[d.type] || "i-ac";
+    return `<article class="card${on ? " on" : ""}${d.online === false ? " offline" : ""}"
+                     data-open="${esc(d.id)}">
+      <div class="card-top">
+        <svg class="dev-icon" viewBox="0 0 24 24"><use href="#${icon}"/></svg>
+        <button class="pwr${on ? " on" : ""}" data-power="${esc(d.id)}" data-on="${on ? 1 : 0}"
+                aria-label="${on ? "Turn off" : "Turn on"} ${esc(d.name)}">
+          <svg viewBox="0 0 24 24"><use href="#i-power"/></svg>
         </button>
-      </div>`;
-    }
-
-    return `
-    <div class="dev compact" data-dev="${d.id}">
-      <span class="${dot}"></span>
-      <span class="dev-name">${esc(d.name)}</span>
-      <span class="dev-state">${esc(d.brief || (on ? "running" : "off"))}</span>
-      <button class="power ${on ? "on" : ""}" data-power="${d.id}" data-on="${on ? 1 : 0}">
-        ${on ? "Off" : "On"}
-      </button>
-    </div>`;
+      </div>
+      <div>
+        <h3>${esc(d.name)}</h3>
+        <p>${esc(cardSub(d))}</p>
+      </div>
+    </article>`;
   }).join("");
 }
 
-function renderJobs(jobs) {
-  const box = $("#jobs");
-  $("#jobCount").textContent = jobs.length;
-  if (!jobs.length) {
-    box.innerHTML = '<p class="empty">Nothing scheduled yet.</p>';
-    return;
-  }
-  box.innerHTML = jobs.map((j) => `
-    <div class="job ${j.enabled ? "" : "off"}">
-      <span class="job-when">${esc(fmtWhen(j.next_run_at))}</span>
-      <span class="job-text" title="${esc(j.summary || "")}">${esc(j.summary || "")}</span>
-      <button class="job-del" data-job="${j.id}" title="Delete">×</button>
-    </div>`).join("");
+/* ---------- quick actions ---------- */
+
+const SCENES = [
+  { key: "off", icon: "i-power", label: "Room off",
+    say: (room) => room === "All" ? "turn off everything in the living room"
+                                  : `turn off everything in the ${room}` },
+  { key: "cool", icon: "i-temp", label: "Cool 24°C",
+    say: (room) => room === "All"
+      ? "turn on the living room AC and set it to 24 degrees"
+      : `turn on the ${room} AC and set it to 24 degrees` },
+  { key: "stuffy", icon: "i-bolt", label: "It's stuffy",
+    say: () => "it's stuffy in here" },
+];
+
+function renderScenes() {
+  $("#scenes").innerHTML = SCENES.map((s) =>
+    `<button class="scene" data-scene="${s.key}">
+      <svg viewBox="0 0 24 24"><use href="#${s.icon}"/></svg>
+      <span>${esc(s.label)}</span>
+    </button>`).join("");
 }
 
-/* ---------------- actions ---------------- */
+/* ---------- next scheduled task ---------- */
+
+function renderNext(jobs) {
+  const box = $("#nextUp");
+  const live = jobs.filter((j) => j.enabled).sort((a, b) =>
+    String(a.next_run_at).localeCompare(String(b.next_run_at)));
+
+  if (!live.length) {
+    box.innerHTML = `<div class="job next" data-tab="jobs">
+      <svg class="job-icon" viewBox="0 0 24 24"><use href="#i-clock"/></svg>
+      <div class="job-main">
+        <strong>Nothing scheduled</strong>
+        <span>Ask the assistant to set one</span>
+      </div>
+    </div>`;
+    return;
+  }
+
+  const j = live[0];
+  box.innerHTML = `<div class="job next" data-tab="jobs">
+    <svg class="job-icon" viewBox="0 0 24 24"><use href="#i-clock"/></svg>
+    <div class="job-main">
+      <strong>${esc(cap(j.summary || j.device_name || "Scheduled task"))}</strong>
+      <span>${esc(fmtWhen(j.next_run_at))}${j.repeat_label ? " · " + esc(repeatShort(j.repeat_label)) : ""}</span>
+    </div>
+    <svg class="job-icon" viewBox="0 0 24 24"><use href="#i-chevron"/></svg>
+  </div>`;
+}
+
+/* ---------- schedule ---------- */
+
+function renderJobs(jobs) {
+  $("#jobCount").textContent = String(jobs.length);
+  const box = $("#jobs");
+
+  if (!jobs.length) {
+    box.innerHTML = `<p class="empty">Nothing scheduled yet.<br>
+      Try “turn off the living room AC every night at 11 pm”.</p>`;
+    return;
+  }
+
+  box.innerHTML = jobs.map((j) => `
+    <div class="job${j.enabled ? "" : " disabled"}">
+      <div class="job-main">
+        <strong>${esc(cap(j.summary || j.device_name || "Scheduled task"))}</strong>
+        <span>${esc(repeatShort(j.repeat_label) || "once")} ·
+          ${j.enabled ? "next " + esc(fmtWhen(j.next_run_at)) : "disabled"}</span>
+      </div>
+      <button class="del" data-del="${esc(j.id)}" aria-label="Delete task">×</button>
+    </div>`).join("") +
+    `<p class="hint">Repeat with “every day”, “on weekdays”, “every Monday at 8 am”.</p>`;
+}
+
+/* ---------- chat ---------- */
+
+function addMsg(role, text) {
+  const el = document.createElement("div");
+  el.className = `msg ${role}`;
+  el.textContent = text;
+  $("#chat").appendChild(el);
+  $("#chat").scrollTop = $("#chat").scrollHeight;
+}
+
+function renderChips() {
+  const devices = (snapshot && snapshot.devices) || [];
+  const primary = devices.find((d) => d.type === "air_conditioner") || devices[0];
+  if (!primary) return;
+
+  const name = primary.name;
+  const room = primary.room || "";
+  const on = !!(primary.state || {}).power;
+
+  const chips = [
+    [`Turn ${on ? "off" : "on"} the ${name}`, on ? "Turn off" : "Turn on"],
+    [`Set the ${name} to 24 degrees`, "24°C"],
+    [`Turn off the ${name} every night at 11 pm`, "11 pm off"],
+  ];
+  if (room) chips.push([`Turn off everything in the ${room}`, "Whole room"]);
+  chips.push(["It's stuffy in here", "It's stuffy"]);
+  chips.push(["What scheduled tasks do I have?", "Schedules"]);
+
+  const sig = chips.map((c) => c[0]).join("|");
+  if (sig === chipsSig) return;
+  chipsSig = sig;
+  $("#chips").innerHTML = chips
+    .map(([say, label]) => `<button data-say="${esc(say)}">${esc(label)}</button>`)
+    .join("");
+}
 
 async function send(text) {
-  if (busy || !text.trim()) return;
-  busy = true;
-  $("#btnSend").disabled = true;
-  addMsg("user", text);
-  $("#input").value = "";
-  showTyping();
+  const trimmed = (text || "").trim();
+  if (!trimmed) return;
 
+  addMsg("user", trimmed);
+  $("#input").value = "";
   try {
     const data = await api("/api/chat", {
       method: "POST",
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text: trimmed }),
     });
-    hideTyping();
-    addMsg("assistant", data.reply || "(no reply)");
-    renderSnapshot(data.snapshot);
-  } catch (e) {
-    hideTyping();
-    addMsg("assistant", "Request failed: " + e.message);
-  } finally {
-    busy = false;
-    $("#btnSend").disabled = false;
-    $("#input").focus();
+    addMsg("assistant", data.reply || "…");
+    if (data.snapshot) {
+      snapshot = data.snapshot;
+      renderAll();
+    }
+    return data.reply || "";
+  } catch (err) {
+    addMsg("system", `Request failed: ${err.message}`);
+    return "";
   }
 }
 
+/* ---------- toast ---------- */
+
+let toastTimer = null;
+
+function toast(text) {
+  const el = $("#toast");
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+}
+
+async function runScene(scene) {
+  const phrase = scene.say(activeRoom);
+  try {
+    const data = await api("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ text: phrase }),
+    });
+    if (data.snapshot) {
+      snapshot = data.snapshot;
+      renderAll();
+    }
+    toast(String(data.reply || "Done").split("\n")[0]);
+  } catch (err) {
+    toast(`Failed: ${err.message}`);
+  }
+}
+
+async function loadMessages() {
+  const data = await api("/api/messages");
+  $("#chat").innerHTML = "";
+  for (const m of data.messages || []) addMsg(m.role, m.content);
+  if (!(data.messages || []).length) {
+    addMsg("system", "Say something, or tap a suggestion below.");
+  }
+  requestAnimationFrame(() => {
+    const chat = $("#chat");
+    chat.scrollTop = chat.scrollHeight;
+  });
+}
+
+/* ---------- device sheet ---------- */
+
+function renderSheet() {
+  const device = findDevice(sheetId);
+  if (!device) return closeSheet();
+
+  const st = device.state || {};
+  const on = !!st.power;
+  const caps = device.capabilities || [];
+  const sub = [device.room || device.type_label, cap(device.brief)].filter(Boolean).join(" · ");
+
+  let body = `<h2>${esc(device.name)}</h2><p class="sub">${esc(sub)}</p>`;
+
+  if (caps.includes("temperature")) {
+    const target = st.target_temp == null ? 26 : st.target_temp;
+    body += `<div class="stepper">
+      <button data-step="-1" ${on ? "" : "disabled"}>−</button>
+      <span class="target">${target}°C</span>
+      <button data-step="1" ${on ? "" : "disabled"}>+</button>
+    </div>`;
+  }
+
+  if (caps.includes("mode")) {
+    body += `<div class="pills">${MODES.map((mode) =>
+      `<button data-mode="${mode}" class="${st.mode === mode ? "active" : ""}">${MODE_LABEL[mode]}</button>`
+    ).join("")}</div>`;
+  }
+
+  body += `<button class="sheet-power ${on ? "on" : ""}" data-sheet-power="${on ? 0 : 1}">
+    ${on ? "Turn off" : "Turn on"}</button>`;
+
+  $("#sheetBody").innerHTML = body;
+}
+
+function openSheet(id) {
+  if (!findDevice(id)) return;
+  sheetId = id;
+  renderSheet();
+  $("#scrim").hidden = false;
+  $("#sheet").hidden = false;
+}
+
+function closeSheet() {
+  sheetId = null;
+  $("#scrim").hidden = true;
+  $("#sheet").hidden = true;
+}
+
+/* ---------- control ---------- */
+
 async function control(deviceId, actions) {
-  if (busy) return;
-  busy = true;
   try {
     const data = await api("/api/control", {
       method: "POST",
       body: JSON.stringify({ device_id: deviceId, actions }),
     });
-    if (!data.ok) addMsg("assistant", "Command failed: " + (data.error || "unknown error"));
-    renderSnapshot(data.snapshot);
-  } catch (e) {
-    addMsg("assistant", "Request failed: " + e.message);
-  } finally {
-    busy = false;
+    if (data.snapshot) {
+      snapshot = data.snapshot;
+      renderAll();
+    }
+  } catch (err) {
+    addMsg("system", `Control failed: ${err.message}`);
   }
 }
 
-/* ---------------- events ---------------- */
+/* ---------- render ---------- */
 
-$("#composer").addEventListener("submit", (e) => {
-  e.preventDefault();
-  send($("#input").value);
-});
+function renderAll() {
+  if (!snapshot) return;
+  $("#backend").textContent = BACKEND_LABEL[snapshot.backend] || snapshot.backend || "";
 
-$("#chips").addEventListener("click", (e) => {
-  const b = e.target.closest("button[data-say]");
-  if (b) send(b.dataset.say);
-});
+  renderRooms();
+  const visible = visibleDevices();
+  renderSummary(visible);
+  renderDevices(visible);
+  if (!$("#scenes").children.length) renderScenes();
+  renderNext(snapshot.jobs || []);
+  renderJobs(snapshot.jobs || []);
+  renderChips();
+  if (sheetId) renderSheet();
+}
 
-$("#devices").addEventListener("click", (e) => {
-  const powerBtn = e.target.closest("button[data-power]");
+async function refresh() {
+  try {
+    snapshot = await api("/api/snapshot");
+    renderAll();
+  } catch (err) {
+    /* keep the last good snapshot rather than blanking the screen */
+  }
+}
+
+/* ---------- events ---------- */
+
+document.addEventListener("click", (event) => {
+  const target = event.target;
+
+  const roomBtn = target.closest("[data-room]");
+  if (roomBtn) {
+    activeRoom = roomBtn.dataset.room;
+    renderRooms();
+    const visible = visibleDevices();
+    renderSummary(visible);
+    renderDevices(visible);
+    return;
+  }
+
+  const powerBtn = target.closest("[data-power]");
   if (powerBtn) {
     const on = powerBtn.dataset.on === "1";
     control(powerBtn.dataset.power, [{ action: "power", value: !on }]);
     return;
   }
 
-  const stepBtn = e.target.closest("button[data-step]");
-  if (stepBtn) {
-    const id = stepBtn.dataset.dev;
-    const dev = snapshot.devices.find((d) => d.id === id);
-    const cur = dev?.state?.target_temp ?? 26;
-    const next = Math.max(16, Math.min(30, cur + Number(stepBtn.dataset.step)));
-    if (next !== cur) control(id, [{ action: "temperature", value: next }]);
+  const stepBtn = target.closest("[data-step]");
+  if (stepBtn && sheetId) {
+    const device = findDevice(sheetId);
+    const current = (device.state || {}).target_temp;
+    const next = (current == null ? 26 : current) + Number(stepBtn.dataset.step);
+    control(sheetId, [{ action: "temperature", value: Math.max(16, Math.min(30, next)) }]);
     return;
   }
 
-  const modeBtn = e.target.closest("button[data-mode]");
-  if (modeBtn) {
-    control(modeBtn.dataset.dev, [{ action: "mode", value: modeBtn.dataset.mode }]);
+  const modeBtn = target.closest("[data-mode]");
+  if (modeBtn && sheetId) {
+    control(sheetId, [{ action: "mode", value: modeBtn.dataset.mode }]);
+    return;
   }
+
+  const sheetPower = target.closest("[data-sheet-power]");
+  if (sheetPower && sheetId) {
+    control(sheetId, [{ action: "power", value: sheetPower.dataset.sheetPower === "1" }]);
+    return;
+  }
+
+  const sceneBtn = target.closest("[data-scene]");
+  if (sceneBtn) {
+    const scene = SCENES.find((s) => s.key === sceneBtn.dataset.scene);
+    if (scene) runScene(scene);
+    return;
+  }
+
+  const card = target.closest("[data-open]");
+  if (card) {
+    openSheet(card.dataset.open);
+    return;
+  }
+
+  const tab = target.closest("[data-tab]");
+  if (tab) {
+    switchTab(tab.dataset.tab);
+    return;
+  }
+
+  const del = target.closest("[data-del]");
+  if (del) {
+    api(`/api/jobs/${del.dataset.del}`, { method: "DELETE" })
+      .then((data) => {
+        if (data.snapshot) {
+          snapshot = data.snapshot;
+          renderAll();
+        }
+      })
+      .catch(() => {});
+    return;
+  }
+
+  const say = target.closest("[data-say]");
+  if (say) {
+    send(say.dataset.say);
+    return;
+  }
+
+  if (target.id === "scrim") closeSheet();
 });
 
-$("#jobs").addEventListener("click", async (e) => {
-  const del = e.target.closest("button[data-job]");
-  if (!del) return;
-  try {
-    const data = await api("/api/jobs/" + del.dataset.job, { method: "DELETE" });
-    renderSnapshot(data.snapshot);
-  } catch (err) {
-    addMsg("assistant", "Delete failed: " + err.message);
+function switchTab(name) {
+  document.querySelectorAll(".tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === name);
+  });
+  for (const key of ["devices", "jobs", "chat"]) {
+    $(`#view-${key}`).hidden = key !== name;
   }
-});
-
-$("#btnClearChat").addEventListener("click", async () => {
-  await api("/api/messages/clear", { method: "POST" });
-  $("#messages").innerHTML = "";
-  addMsg("assistant", "Chat cleared. Scheduled tasks are untouched.");
-});
-
-/* ---------------- boot ---------------- */
-
-async function boot() {
-  try {
-    const [snap, msgs] = await Promise.all([
-      api("/api/snapshot"),
-      api("/api/messages"),
-    ]);
-    renderSnapshot(snap);
-
-    const box = $("#messages");
-    box.innerHTML = "";
-    for (const m of msgs.messages) addMsg(m.role, m.content);
-    if (!msgs.messages.length) {
-      addMsg("assistant",
-        'Hi — I can control your LG appliances and run them on a schedule.\n' +
-        'Try: "turn on the living room AC at 10:30 pm", "set it to 24 degrees", ' +
-        '"turn off the AC every night at 11 pm".');
-    }
-  } catch (e) {
-    $("#subtitle").textContent = "Not connected: " + e.message;
-  }
+  if (name === "chat") loadMessages().catch(() => {});
 }
 
-setInterval(async () => {
-  if (busy || document.hidden) return;
-  try {
-    renderSnapshot(await api("/api/snapshot"));
-  } catch (_) { /* ignore polling errors */ }
-}, 5000);
+$("#composer").addEventListener("submit", (event) => {
+  event.preventDefault();
+  send($("#input").value);
+});
 
-boot();
-$("#input").focus();
+$("#clearJobs").addEventListener("click", () => {
+  api("/api/jobs/clear", { method: "POST" })
+    .then((data) => {
+      if (data.snapshot) {
+        snapshot = data.snapshot;
+        renderAll();
+      }
+    })
+    .catch(() => {});
+});
+
+/* ---------- boot ---------- */
+
+refresh();
+setInterval(refresh, 4000);
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}

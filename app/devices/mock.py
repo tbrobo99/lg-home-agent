@@ -27,9 +27,9 @@ DEVICES = [
 
 DEFAULT_STATES = {
     "ac_living": {"power": False, "mode": "cool", "target_temp": 26,
-                  "current_temp": 29.4, "fan": "auto"},
+                  "current_temp": 29.4, "humidity": 52, "fan": "auto"},
     "ac_bedroom": {"power": False, "mode": "cool", "target_temp": 27,
-                   "current_temp": 28.6, "fan": "auto"},
+                   "current_temp": 28.6, "humidity": 55, "fan": "auto"},
     "purifier": {"power": False, "fan": "auto", "pm25": 42},
     "washer": {"power": False, "state": "standby", "remaining_min": 0},
     "fridge": {"power": True, "fridge_temp": 3, "freezer_temp": -18},
@@ -75,16 +75,24 @@ class MockAdapter(DeviceAdapter):
         while not self._stop.wait(5):
             with self._lock:
                 for st in self._states.values():
-                    if "current_temp" not in st:
-                        continue
-                    target = st["current_temp"]
-                    if st.get("power") and st.get("mode") in ("cool", "heat"):
-                        goal = st.get("target_temp", 26)
-                        target += max(-0.35, min(0.35, (goal - target) * 0.18))
-                        target += random.uniform(-0.05, 0.05)
-                    else:
-                        target += random.uniform(-0.12, 0.14)
-                    st["current_temp"] = round(min(34.0, max(16.0, target)), 1)
+                    if "current_temp" in st:
+                        target = st["current_temp"]
+                        if st.get("power") and st.get("mode") in ("cool", "heat"):
+                            goal = st.get("target_temp", 26)
+                            target += max(-0.35, min(0.35, (goal - target) * 0.18))
+                            target += random.uniform(-0.05, 0.05)
+                        else:
+                            target += random.uniform(-0.12, 0.14)
+                        st["current_temp"] = round(min(34.0, max(16.0, target)), 1)
+
+                    # A cooling unit pulls moisture out of the air, which is why
+                    # the humidity tile moves in the opposite direction.
+                    if st.get("humidity") is not None:
+                        drying = st.get("power") and st.get("mode") in ("cool", "dry")
+                        goal_h = 45 if drying else 58
+                        st["humidity"] += max(-0.6, min(0.6, (goal_h - st["humidity"]) * 0.08))
+                        st["humidity"] = round(min(90, max(20, st["humidity"])))
+
                     if st.get("pm25") is not None:
                         st["pm25"] = max(
                             5, st["pm25"] - (3 if st.get("power") else -2) + random.randint(-1, 1)
