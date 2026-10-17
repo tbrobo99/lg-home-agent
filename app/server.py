@@ -1,0 +1,123 @@
+"""HTTP server (Python standard library, no dependencies)."""
+from __future__ import annotations
+
+import json
+import mimetypes
+import re
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlparse
+
+from . import db
+
+WEB_DIR = Path(__file__).resolve().parent / "web"
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "LGHomeAgent/1.1"
+    agent_ref = None  # injected by serve()
+
+    # ------------------------------------------------ helpers
+
+    def log_message(self, fmt, *args):
+        pass  # keep the console clean
+
+    def _send(self, code: int, body: bytes, ctype: str) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _json(self, data, code: int = 200) -> None:
+        self._send(code, json.dumps(data, ensure_ascii=False, default=str).encode("utf-8"),
+                   "application/json; charset=utf-8")
+
+    def _body(self) -> dict:
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            if n <= 0:
+                return {}
+            return json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+        except (ValueError, json.JSONDecodeError):
+            return {}
+
+    def _static(self, rel: str) -> None:
+        rel = rel.lstrip("/") or "index.html"
+        if not re.fullmatch(r"[A-Za-z0-9_\-./]+", rel) or ".." in rel:
+            self._send(403, b"forbidden", "text/plain")
+            return
+        path = WEB_DIR / rel
+        if not path.is_file():
+            self._send(404, b"not found", "text/plain")
+            return
+        ctype = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+        if ctype.startswith("text/") or ctype == "application/javascript":
+            ctype += "; charset=utf-8"
+        self._send(200, path.read_bytes(), ctype)
+
+    # ------------------------------------------------ routes
+
+    def do_GET(self) -> None:
+        path = urlparse(self.path).path
+        if path in ("/", "/index.html"):
+            return self._static("index.html")
+        if path == "/api/snapshot":
+            return self._json(self.agent_ref.snapshot())
+        if path == "/api/messages":
+            return self._json({"messages": db.recent_messages(60)})
+        if path == "/api/logs":
+            return self._json({"logs": db.recent_logs(60)})
+        if path.startswith("/api/"):
+            return self._json({"error": "not found"}, 404)
+        return self._static(path)
+
+    def do_POST(self) -> None:
+        path = urlparse(self.path).path
+        body = self._body()
+
+        if path == "/api/chat":
+            text = (body.get("text") or "").strip()
+            if not text:
+                return self._json({"error": "text must not be empty"}, 400)
+            result = self.agent_ref.handle(text)
+            return self._json({**result, "snapshot": self.agent_ref.snapshot()})
+
+        if path == "/api/control":
+            device_id = body.get("device_id")
+            actions = body.get("actions") or []
+            if not device_id or not actions:
+                return self._json({"error": "device_id and actions are required"}, 400)
+            res = self.agent_ref.adapter.apply(device_id, actions)
+            db.log("control.manual", f"{device_id} {actions} -> {res.get('ok')}")
+            return self._json({**res, "snapshot": self.agent_ref.snapshot()})
+
+        if path == "/api/jobs/clear":
+            n = db.clear_jobs()
+            return self._json({"ok": True, "deleted": n,
+                               "snapshot": self.agent_ref.snapshot()})
+
+        if path == "/api/messages/clear":
+            db.clear_messages()
+            return self._json({"ok": True})
+
+        return self._json({"error": "not found"}, 404)
+
+    def do_DELETE(self) -> None:
+        path = urlparse(self.path).path
+        m = re.fullmatch(r"/api/jobs/([A-Za-z0-9_]+)", path)
+        if m:
+            ok = db.delete_job(m.group(1))
+            return self._json({"ok": ok, "snapshot": self.agent_ref.snapshot()})
+        return self._json({"error": "not found"}, 404)
+
+
+def serve(agent, host: str = "127.0.0.1", port: int = 8848) -> ThreadingHTTPServer:
+    Handler.agent_ref = agent
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    httpd.daemon_threads = True
+    return httpd

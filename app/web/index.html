@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LG Smart Home Agent</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo"></span>
+    <div>
+      <h1>LG Smart Home Agent</h1>
+      <p id="subtitle">Connecting…</p>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <span id="badgeBackend" class="badge">—</span>
+    <span id="badgeLLM" class="badge ghost">Rule engine</span>
+    <button id="btnClearChat" class="btn-ghost" title="Clear the conversation">Clear chat</button>
+  </div>
+</header>
+
+<main class="app">
+  <section class="panel chat">
+    <div id="messages" class="messages">
+      <div class="msg assistant">
+        <div class="bubble">
+          <p>Hi — I can control your LG appliances and run them on a schedule.</p>
+          <p class="dim">Try: "turn on the living room AC at 10:30 pm" · "set it to 24 degrees" · "turn off the AC every night at 11 pm"</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="chips" id="chips">
+      <button data-say="Turn on the living room AC">Turn on living room AC</button>
+      <button data-say="Set the living room AC to 24 degrees">Set to 24°C</button>
+      <button data-say="Turn off the living room AC every night at 11 pm">Every night 11 pm off</button>
+      <button data-say="What's the temperature in the living room?">What's the temperature?</button>
+      <button data-say="What scheduled tasks do I have?">Show schedules</button>
+    </div>
+
+    <form class="composer" id="composer">
+      <input id="input" type="text" autocomplete="off"
+             placeholder='Ask me anything — e.g. "turn on the living room AC at 10:30 pm"'>
+      <button type="submit" id="btnSend">Send</button>
+    </form>
+  </section>
+
+  <aside class="panel side">
+    <div class="side-head">
+      <h2>Devices</h2>
+      <span id="devCount" class="count">0</span>
+    </div>
+    <div id="devices" class="devices"></div>
+
+    <div class="side-head">
+      <h2>Scheduled tasks</h2>
+      <span id="jobCount" class="count">0</span>
+    </div>
+    <div id="jobs" class="jobs"></div>
+    <p class="hint">Tasks are stored in SQLite, so restarting the server will not lose them.
+      A dedicated scheduler thread runs them at the right second — not the language model.</p>
+  </aside>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

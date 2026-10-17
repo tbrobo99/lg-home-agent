@@ -1,0 +1,5 @@
+# 核心功能零依赖 —— 只用 Python 标准库，装好 Python 就能跑。
+# 以下为可选增强，按需安装。
+
+# 接入真实 LG 家电（官方 ThinQ Open API SDK）
+# thinqconnect>=1.0.14

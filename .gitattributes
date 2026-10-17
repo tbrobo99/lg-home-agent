@@ -1,0 +1,8 @@
+# Normalise line endings so the repo behaves the same on Linux, macOS and Windows.
+* text=auto eol=lf
+
+# Windows batch files must keep CRLF.
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
