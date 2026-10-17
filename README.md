@@ -4,7 +4,10 @@ A conversational agent for a whole-home LG appliance setup. You talk to it in pl
 English, and it both acts immediately and schedules future actions — *"turn off the
 living room AC every night at 11 pm"* becomes a durable task that actually fires.
 
-![UI](docs/screenshot.png)
+It ships as a phone app: an installable PWA you can add to the home screen, and the
+same files package into an Android APK with Capacitor. No framework, no build step.
+
+<img src="docs/screenshot.png" width="330" alt="Devices screen"> <img src="docs/screenshot-chat.png" width="330" alt="Assistant screen">
 
 ```
 You    turn on the living room AC
@@ -44,6 +47,7 @@ Agent  Scheduled — every day at 23:00: turn off the Living Room AC.
 | Manage schedules | `what scheduled tasks do I have?` · `cancel all` |
 | **Several devices at once** | `set everything in the living room to 24 degrees` · `turn off all the ACs` |
 | **Dialogue state** | `it's stuffy in here` → `Which room?` → `bedroom` |
+| **Phone app** | installable PWA: room tabs, a per-device control sheet, one-tap quick actions |
 
 It understands times as people actually say them: `10:30 pm`, `at 7 am tomorrow`,
 `half past ten`, `quarter to eight in the evening`, `in half an hour`.
@@ -157,6 +161,16 @@ while the AC runs).
 
 On Windows you can also double-click `start.bat`.
 
+### On a phone
+
+```bash
+python run.py --lan
+```
+
+It prints the address to open on the phone, e.g. `Phone: http://192.168.1.23:8848`.
+From there, *Add to Home Screen* installs it as a standalone app. See
+[docs/APP.md](docs/APP.md) for the PWA install and the Capacitor APK build.
+
 `config.json` is created on first run. To see the available options up front, copy
 `config.example.json` and edit it — the file is git-ignored because it holds your PAT.
 
@@ -166,7 +180,7 @@ On Windows you can also double-click `start.bat`.
 
 ```
 ┌──────────────────────────────────────────────┐
-│  Web UI  (vanilla HTML/CSS/JS, no build step)│
+│  App shell  (PWA: HTML/CSS/JS, no build step)│
 └───────────────────┬──────────────────────────┘
                     │  HTTP / JSON
 ┌───────────────────▼──────────────────────────┐
@@ -205,14 +219,21 @@ lg-home-agent/
 │   ├── scheduler.py        durable task runner
 │   ├── server.py           HTTP server (stdlib)
 │   ├── devices/            adapter interface + mock + ThinQ
-│   └── web/                UI
+│   └── web/                PWA app shell
+│       ├── index.html      markup + SVG icon sprite
+│       ├── style.css       visual system
+│       ├── app.js          state + rendering
+│       ├── manifest.webmanifest
+│       └── sw.js           service worker
 ├── tests/                  62 unit tests, stdlib only
 ├── eval/                   reproducible intent-parser benchmark
 │   ├── dataset.jsonl       56 labelled utterances, fixed clock
 │   └── run.py              accuracy per category, `--min` for CI
 ├── tools/
-│   └── thinq_check.py      ThinQ calibration helper
+│   ├── thinq_check.py      ThinQ calibration helper
+│   └── icon-source.html    renders the app icons
 ├── docs/
+│   ├── APP.md              PWA install, Capacitor APK build
 │   ├── DEPLOY.md           always-on deployment, campus network notes
 │   └── DEMO.md             recording script
 └── .github/workflows/      CI: tests + eval on Linux and Windows
@@ -312,7 +333,13 @@ and malformed JSON fall back to the rule engine, so the assistant never stalls.
    reject commands.
 3. **Control payloads need calibration** against your model's profile (section 5).
 4. **Single user, no auth.** It is a local assistant, not a multi-tenant service.
+   `--lan` exposes it to the whole network with no password.
 5. **No voice input yet.** Text in, text out.
+6. **Group commands do not know what should stay on.** *"turn off everything"* also
+   switches off the fridge; the group branch in `_do_control` has no notion of
+   appliances that are meant to keep running.
+7. **No sensors.** Temperature and humidity come from the simulator; the app shell shows
+   them, but nothing reads a real sensor yet.
 
 ---
 
@@ -339,6 +366,7 @@ and malformed JSON fall back to the rule engine, so the assistant never stalls.
 | NLU | hand-written rules | determinism where correctness matters |
 | LLM | OpenAI-compatible API | optional, swappable, never authoritative |
 | Frontend | vanilla HTML/CSS/JS | no build step, opens instantly |
+| App | PWA (`manifest` + service worker) | installs to the home screen; Capacitor for an APK |
 
 ---
 
@@ -410,11 +438,15 @@ server and asserts a real request round-trips (`.github/workflows/tests.yml`).
 ## 12. Deployment
 
 See [docs/DEPLOY.md](docs/DEPLOY.md) for running this 24/7: systemd unit, Windows
-service options, and the campus-network case (portal login on the router, agent inside
-the LAN).
+service options, the campus-network case (portal login on the router, agent inside
+the LAN), and running the agent on the OpenWrt router itself (it fits a 128 MB
+Redmi AC2100).
 
 A scheduled task only fires if the process is alive. `Restart=always` plus a persistent
 `data/` directory is the whole story.
+
+The phone app is the same server: `python run.py --lan`, then add the page to the home
+screen. Packaging it as an APK is covered in [docs/APP.md](docs/APP.md).
 
 For recording a demo, see [docs/DEMO.md](docs/DEMO.md).
 
