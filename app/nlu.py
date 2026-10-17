@@ -269,15 +269,16 @@ def build_rule(text: str, now: datetime) -> tuple[dict | None, str]:
 # ---------------------------------------------------------------- devices
 
 TYPE_ALIASES = {
-    "air_conditioner": [r"\bac\b", r"\ba/c\b", r"air[\s-]?con(?:ditioner|ditioning)?",
+    "air_conditioner": [r"\bac\b", r"\bacs\b", r"\ba/c\b",
+                        r"air[\s-]?con(?:ditioner|ditioning)?s?",
                         r"\baircon\b"],
-    "air_purifier": [r"\bpurifier\b", r"air purifier"],
-    "washer": [r"\bwasher\b", r"washing machine"],
-    "dryer": [r"\bdryer\b", r"tumble dryer"],
-    "refrigerator": [r"\bfridge\b", r"\brefrigerator\b"],
-    "dish_washer": [r"\bdishwasher\b"],
+    "air_purifier": [r"\bpurifiers?\b", r"air purifier"],
+    "washer": [r"\bwashers?\b", r"washing machine"],
+    "dryer": [r"\bdryers?\b", r"tumble dryer"],
+    "refrigerator": [r"\bfridges?\b", r"\brefrigerators?\b"],
+    "dish_washer": [r"\bdishwashers?\b"],
     "water_heater": [r"water heater"],
-    "dehumidifier": [r"\bdehumidifier\b"],
+    "dehumidifier": [r"\bdehumidifiers?\b"],
     "styler": [r"\bstyler\b", r"clothes care"],
     "robot_cleaner": [r"robot vacuum", r"\broombra\b", r"vacuum"],
 }
@@ -342,14 +343,13 @@ def match_device(text: str, devices: list[dict], default_room: str = "",
 # ---------------------------------------------------------------- actions
 
 OFF_RE = re.compile(
-    r"\b(turn|switch|power)\s+(?:it\s+|them\s+)?off\b"
+    r"\b(turn|switch|power)\b[^.?!]{0,24}?\boff\b"
     r"|\bshut\s+(?:it\s+|them\s+)?(?:down|off)\b"
-    r"|\b(stop|kill|deactivate|disable)\b"
-    r"|\bswitch\s+off\b", re.I)
+    r"|\b(stop|kill|deactivate|disable)\b", re.I)
 ON_RE = re.compile(
-    r"\b(turn|switch|power)\s+(?:it\s+|them\s+)?on\b"
+    r"\b(turn|switch|power)\b[^.?!]{0,24}?\bon\b"
     r"|\b(start|activate|enable|resume)\b"
-    r"|\bwake\s+up\b|\bswitch\s+on\b", re.I)
+    r"|\bwake\s+up\b", re.I)
 
 TEMP_DEG_RE = re.compile(
     r"\b(\d{1,2})\s*(?:\u00b0\s*c|\u00b0|degrees?(?:\s+celsius)?|celsius)\b", re.I)
@@ -364,10 +364,10 @@ MODE_PATTERNS = [
     (re.compile(r"\bauto\s*mode\b", re.I), "auto"),
 ]
 FAN_PATTERNS = [
-    (re.compile(r"\bfan\s*(?:speed\s*)?(?:high|max|strong)\b|\bhigh\s+fan\b", re.I), "high"),
-    (re.compile(r"\bfan\s*(?:speed\s*)?(?:mid|medium|normal)\b", re.I), "mid"),
-    (re.compile(r"\bfan\s*(?:speed\s*)?(?:low|min|quiet)\b|\blow\s+fan\b", re.I), "low"),
-    (re.compile(r"\bfan\s*(?:speed\s*)?auto\b|\bauto\s+fan\b", re.I), "auto"),
+    (re.compile(r"\bfan\b[^.?!]{0,14}?\b(?:high|max|strong)\b|\bhigh\s+fan\b", re.I), "high"),
+    (re.compile(r"\bfan\b[^.?!]{0,14}?\b(?:mid|medium|normal)\b", re.I), "mid"),
+    (re.compile(r"\bfan\b[^.?!]{0,14}?\b(?:low|min|quiet)\b|\blow\s+fan\b", re.I), "low"),
+    (re.compile(r"\bfan\b[^.?!]{0,14}?\bauto\b|\bauto\s+fan\b", re.I), "auto"),
 ]
 
 
@@ -426,13 +426,98 @@ LIST_RE = re.compile(
     r"|\b(schedule[sd]?|timer[s]?|task[s]?|job[s]?)\b.*\b(list|do i have|are there)\b", re.I)
 
 
+GROUP_RE = re.compile(r"\b(everything|all|both)\b|\bevery\s+device\b", re.I)
+
+COMFORT_PATTERNS = [
+    (re.compile(r"\b(stuffy|muggy|humid|hot|sweaty|boiling|stifling)\b", re.I),
+     [{"action": "power", "value": True},
+      {"action": "mode", "value": "cool"},
+      {"action": "temperature", "value": 24}]),
+    (re.compile(r"\b(cold|freezing|chilly|shivering)\b", re.I),
+     [{"action": "power", "value": True},
+      {"action": "mode", "value": "heat"},
+      {"action": "temperature", "value": 24}]),
+    (re.compile(r"\b(too\s+loud|noisy|too\s+noisy)\b", re.I),
+     [{"action": "fan", "value": "low"}]),
+]
+
+
+def extract_comfort(text: str) -> list[dict]:
+    """Map a feeling ("it's stuffy") onto concrete device actions."""
+    for rx, acts in COMFORT_PATTERNS:
+        if rx.search(text):
+            return [dict(a) for a in acts]
+    return []
+
+
+def resolve_targets(text: str, devices: list[dict], default_room: str = "",
+                    fallback: dict | None = None) -> tuple[list[dict], str]:
+    """Resolve one utterance to one or more devices.
+
+    Handles "everything", "all the ACs", "both", a bare room name ("turn off the
+    living room"), and the ordinary single-device case.
+    """
+    t = text.lower()
+    type_hits = [d for d in devices
+                 if any(p.search(t) for p in _alias_patterns(d.get("type", "")))]
+    room_hits = [d for d in devices
+                 if (d.get("room") or "").lower() and (d.get("room") or "").lower() in t]
+
+    if GROUP_RE.search(t):
+        if type_hits and room_hits:
+            pool = [d for d in type_hits if d in room_hits] or type_hits
+        elif type_hits:
+            pool = type_hits
+        elif room_hits:
+            pool = room_hits
+        else:
+            pool = list(devices)
+        label = ("everything" if len(pool) == len(devices)
+                 else " and ".join(d["name"] for d in pool))
+        return pool, label
+
+    if room_hits and not type_hits:
+        room = room_hits[0].get("room", "")
+        return room_hits, f"everything in the {room}"
+
+    single, _ties = match_device(text, devices, default_room, fallback)
+    return ([single] if single else []), (single["name"] if single else "")
+
+
+def set_targets(res: dict, targets: list[dict], label: str = "") -> dict:
+    """Write a target list onto an intent, keeping single-device fields for compat."""
+    res["targets"] = [{"id": d["id"], "name": d["name"]} for d in targets]
+    if len(targets) == 1:
+        res["device_id"] = targets[0]["id"]
+        res["device_name"] = targets[0]["name"]
+    else:
+        res["device_id"] = None
+        res["device_name"] = label or f"{len(targets)} devices"
+    return res
+
+
+def _ask_for(res: dict, slot: str, devices: list[dict], **partial) -> dict:
+    """Mark a slot as missing so the agent can ask for it and remember the rest."""
+    res["intent"] = "need_" + slot
+    res["missing"] = slot
+    res.update(partial)
+    if slot == "target":
+        prompt = "Which room?" if res.get("comfort") else "Which device?"
+        res["clarify"] = (prompt + " I can control: "
+                          + ", ".join(d["name"] for d in devices[:6]))
+    else:
+        res["clarify"] = ('What should I do at that time? '
+                          'e.g. "turn off the AC at 11 pm".')
+    return res
+
+
 def parse(text: str, devices: list[dict], now: datetime | None = None,
           default_room: str = "Living Room",
           fallback_device: dict | None = None) -> dict:
     now = now or datetime.now()
     t = (text or "").strip()
     res = {
-        "intent": "unknown", "device_id": None, "device_name": None,
+        "intent": "unknown", "device_id": None, "device_name": None, "targets": [],
         "actions": [], "rule": None, "repeat_label": "",
         "confidence": 0.0, "clarify": None, "raw_text": t,
     }
@@ -455,35 +540,36 @@ def parse(text: str, devices: list[dict], now: datetime | None = None,
     # 2. actions + time decide control vs schedule
     actions = extract_actions(t)
     rule, label = build_rule(t, now)
-    device, ties = match_device(t, devices, default_room, fallback_device)
+
+    comfort: list[dict] = []
+    if not actions and not QUERY_RE.search(t):
+        comfort = extract_comfort(t)
+        if comfort:
+            actions = comfort
+            res["comfort"] = True
+
+    # A feeling ("it's stuffy") is about the room, not about the last device we
+    # happened to touch, so do not silently resolve it to the fallback device.
+    fb = None if comfort else fallback_device
+    targets, target_label = resolve_targets(t, devices, default_room, fb)
 
     if rule:
         if not actions:
-            res["clarify"] = ('What should I do at that time? '
-                              'e.g. "turn off the AC at 11 pm".')
-            return res
-        if not device:
-            res["intent"] = "unknown"
-            res["clarify"] = ("Which device? I can control: "
-                              + ", ".join(d["name"] for d in devices[:6]))
-            return res
-        res.update(intent="schedule", device_id=device["id"],
-                   device_name=device["name"], actions=actions,
-                   rule=rule, repeat_label=label, confidence=0.92)
-        if len(ties) > 1:
-            res["clarify"] = (f'Multiple devices matched, so I used "{device["name"]}".')
+            return _ask_for(res, "action", devices, rule=rule,
+                            targets=[{"id": d["id"], "name": d["name"]} for d in targets])
+        if not targets:
+            return _ask_for(res, "target", devices, actions=actions, rule=rule,
+                            repeat_label=label)
+        res.update(intent="schedule", actions=actions, rule=rule,
+                   repeat_label=label, confidence=0.92)
+        set_targets(res, targets, target_label)
         return res
 
     if actions:
-        if not device:
-            res["intent"] = "unknown"
-            res["clarify"] = ("Which device? I can control: "
-                              + ", ".join(d["name"] for d in devices[:6]))
-            return res
-        res.update(intent="control", device_id=device["id"],
-                   device_name=device["name"], actions=actions, confidence=0.88)
-        if len(ties) > 1:
-            res["clarify"] = (f'Multiple devices matched, so I used "{device["name"]}".')
+        if not targets:
+            return _ask_for(res, "target", devices, actions=actions)
+        res.update(intent="control", actions=actions, confidence=0.88)
+        set_targets(res, targets, target_label)
         return res
 
     # 3. status questions
@@ -498,8 +584,7 @@ def parse(text: str, devices: list[dict], now: datetime | None = None,
             device = pool[0] if pool else None
             ties = []
         if device:
-            res["device_id"] = device["id"]
-            res["device_name"] = device["name"]
+            set_targets(res, [device])
             if len(ties) > 1:
                 res["clarify"] = (f'Multiple devices matched, so I answered for '
                                   f'"{device["name"]}".')

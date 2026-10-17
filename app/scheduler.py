@@ -22,10 +22,57 @@ class Scheduler:
         self._thread = threading.Thread(target=self._loop, daemon=True, name="scheduler")
 
     def start(self) -> None:
+        self._catch_up()
         self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
+
+    # ------------------------------------------------ restart recovery
+
+    def _catch_up(self) -> None:
+        """Deal with jobs that came due while the process was not running.
+
+        Deliberately does NOT fire them. Running a command hours late is worse
+        than not running it — turning the AC on because it was supposed to turn
+        on three days ago is a bug, not a feature. One-time jobs are closed out
+        as missed; recurring jobs skip the lost occurrence and reschedule.
+        """
+        now = datetime.now()
+        missed = 0
+
+        for job in db.list_jobs(only_enabled=True):
+            raw = job.get("next_run_at")
+            if not raw:
+                continue
+            try:
+                due = datetime.fromisoformat(raw)
+            except ValueError:
+                continue
+            if due >= now:
+                continue
+
+            missed += 1
+            when = due.strftime("%b %d, %H:%M")
+            if job["rule"].get("type") == "once":
+                db.update_job_after_run(
+                    job["id"], None, f"Missed: agent was offline at {when}", disable=True)
+            else:
+                nxt = nlu.compute_next(job["rule"], now)
+                db.update_job_after_run(
+                    job["id"],
+                    nxt.isoformat(timespec="seconds") if nxt else None,
+                    f"Missed the {when} run; rescheduled")
+
+        if missed:
+            db.log("scheduler.catchup", f"{missed} overdue job(s) handled")
+            db.add_message(
+                "system",
+                f"\u23f1 {missed} scheduled task(s) came due while the agent was "
+                f"offline. Nothing was fired late \u2014 one-time tasks were closed "
+                f"out as missed and recurring ones moved to their next slot.",
+                {"catchup": missed},
+            )
 
     def _loop(self) -> None:
         while not self._stop.wait(1.0):

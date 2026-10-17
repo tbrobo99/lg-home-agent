@@ -1,0 +1,56 @@
+{"category": "immediate", "text": "turn on the living room AC", "intent": "control", "device": "ac_living", "actions": [["power", true]]}
+{"category": "immediate", "text": "turn off the living room AC", "intent": "control", "device": "ac_living", "actions": [["power", false]]}
+{"category": "immediate", "text": "switch on the bedroom AC", "intent": "control", "device": "ac_bedroom", "actions": [["power", true]]}
+{"category": "immediate", "text": "shut down the purifier", "intent": "control", "device": "purifier", "actions": [["power", false]]}
+{"category": "immediate", "text": "start the washer", "intent": "control", "device": "washer", "actions": [["power", true]]}
+{"category": "immediate", "text": "please turn the bedroom AC on", "intent": "control", "device": "ac_bedroom", "actions": [["power", true]]}
+{"category": "immediate", "text": "turn on the AC", "intent": "control", "device": "ac_living", "actions": [["power", true]]}
+{"category": "immediate", "text": "turn off everything", "intent": "control", "targets": ["ac_living", "ac_bedroom", "purifier", "washer", "fridge"], "actions": [["power", false]]}
+{"category": "immediate", "text": "turn off everything in the living room", "intent": "control", "targets": ["ac_living", "purifier"], "actions": [["power", false]]}
+{"category": "immediate", "text": "turn off all the ACs", "intent": "control", "targets": ["ac_living", "ac_bedroom"], "actions": [["power", false]]}
+{"category": "immediate", "text": "turn off the living room", "intent": "control", "targets": ["ac_living", "purifier"], "actions": [["power", false]]}
+{"category": "temperature", "text": "set the living room AC to 24 degrees", "intent": "control", "device": "ac_living", "actions": [["temperature", 24]]}
+{"category": "temperature", "text": "set the AC to 22", "intent": "control", "device": "ac_living", "actions": [["temperature", 22]]}
+{"category": "temperature", "text": "make it 26 degrees in the bedroom", "intent": "control", "device": "ac_bedroom", "actions": [["temperature", 26]]}
+{"category": "temperature", "text": "set the bedroom AC to 30", "intent": "control", "device": "ac_bedroom", "actions": [["temperature", 30]]}
+{"category": "temperature", "text": "cool the bedroom to 21 degrees", "intent": "control", "device": "ac_bedroom", "actions": [["temperature", 21], ["mode", "cool"]]}
+{"category": "temperature", "text": "change the temperature to 20", "intent": "need_target"}
+{"category": "mode_fan", "text": "switch the AC to heat", "intent": "control", "device": "ac_living", "actions": [["mode", "heat"]]}
+{"category": "mode_fan", "text": "set the bedroom AC to dehumidify", "intent": "control", "device": "ac_bedroom", "actions": [["mode", "dry"]]}
+{"category": "mode_fan", "text": "put the AC in fan mode", "intent": "control", "device": "ac_living", "actions": [["mode", "fan"]]}
+{"category": "mode_fan", "text": "set the AC fan to low", "intent": "control", "device": "ac_living", "actions": [["fan", "low"]]}
+{"category": "mode_fan", "text": "turn on the purifier fan high", "intent": "control", "device": "purifier", "actions": [["power", true], ["fan", "high"]]}
+{"category": "query", "text": "what's the temperature in the bedroom?", "intent": "query", "device": "ac_bedroom"}
+{"category": "query", "text": "is the AC on?", "intent": "query", "device": "ac_living"}
+{"category": "query", "text": "how hot is it", "intent": "query", "device": "ac_living"}
+{"category": "query", "text": "what's the living room AC set to", "intent": "query", "device": "ac_living"}
+{"category": "query", "text": "status of the washer", "intent": "query", "device": "washer"}
+{"category": "query", "text": "is the fridge running", "intent": "query", "device": "fridge"}
+{"category": "once", "text": "turn off the AC at 11 pm", "intent": "schedule", "device": "ac_living", "actions": [["power", false]], "rule": {"type": "once", "run_at": "2026-10-17T23:00:00"}}
+{"category": "once", "text": "turn off the AC at 11:30 pm", "intent": "schedule", "device": "ac_living", "actions": [["power", false]], "rule": {"type": "once", "run_at": "2026-10-17T23:30:00"}}
+{"category": "once", "text": "in 30 minutes turn off the washer", "intent": "schedule", "device": "washer", "actions": [["power", false]], "rule": {"type": "once", "run_at": "2026-10-17T19:12:00"}}
+{"category": "once", "text": "in 2 hours turn off the purifier", "intent": "schedule", "device": "purifier", "actions": [["power", false]], "rule": {"type": "once", "run_at": "2026-10-17T20:42:00"}}
+{"category": "once", "text": "at 7 am tomorrow turn on the AC", "intent": "schedule", "device": "ac_living", "actions": [["power", true]], "rule": {"type": "once", "run_at": "2026-10-18T07:00:00"}}
+{"category": "once", "text": "at half past ten turn off the AC", "intent": "schedule", "device": "ac_living", "actions": [["power", false]], "rule": {"type": "once", "run_at": "2026-10-17T22:30:00"}}
+{"category": "once", "text": "at quarter to eight in the evening turn on the AC", "intent": "schedule", "device": "ac_living", "actions": [["power", true]], "rule": {"type": "once", "run_at": "2026-10-17T19:45:00"}}
+{"category": "once", "text": "turn off the AC tonight at 11", "intent": "schedule", "device": "ac_living", "actions": [["power", false]], "rule": {"type": "once", "run_at": "2026-10-17T23:00:00"}}
+{"category": "daily", "text": "turn off the AC every night at 11 pm", "intent": "schedule", "device": "ac_living", "actions": [["power", false]], "rule": {"type": "daily", "at": "23:00"}}
+{"category": "daily", "text": "every day at 7 am turn on the bedroom AC", "intent": "schedule", "device": "ac_bedroom", "actions": [["power", true]], "rule": {"type": "daily", "at": "07:00"}}
+{"category": "daily", "text": "turn on the purifier daily at 9 am", "intent": "schedule", "device": "purifier", "actions": [["power", true]], "rule": {"type": "daily", "at": "09:00"}}
+{"category": "recurring", "text": "every weekday at 7 am turn on the bedroom AC", "intent": "schedule", "device": "ac_bedroom", "actions": [["power", true]], "rule": {"type": "weekday", "at": "07:00"}}
+{"category": "recurring", "text": "on weekdays at 8 am turn off the AC", "intent": "schedule", "device": "ac_living", "actions": [["power", false]], "rule": {"type": "weekday", "at": "08:00"}}
+{"category": "recurring", "text": "every Monday and Wednesday at 8 am turn on the AC", "intent": "schedule", "device": "ac_living", "actions": [["power", true]], "rule": {"type": "weekly", "at": "08:00", "weekdays": [0, 2]}}
+{"category": "recurring", "text": "every friday at 6 pm turn off the purifier", "intent": "schedule", "device": "purifier", "actions": [["power", false]], "rule": {"type": "weekly", "at": "18:00", "weekdays": [4]}}
+{"category": "recurring", "text": "every weekend at 10 am turn on the AC", "intent": "schedule", "device": "ac_living", "actions": [["power", true]], "rule": {"type": "weekly", "at": "10:00", "weekdays": [5, 6]}}
+{"category": "recurring", "text": "every 2 hours turn on the purifier", "intent": "schedule", "device": "purifier", "actions": [["power", true]], "rule": {"type": "interval", "interval_seconds": 7200}}
+{"category": "recurring", "text": "every hour turn off the AC", "intent": "schedule", "device": "ac_living", "actions": [["power", false]], "rule": {"type": "interval", "interval_seconds": 3600}}
+{"category": "group_schedule", "text": "turn off everything in the living room at 11 pm", "intent": "schedule", "targets": ["ac_living", "purifier"], "actions": [["power", false]], "rule": {"type": "once", "run_at": "2026-10-17T23:00:00"}}
+{"category": "housekeeping", "text": "what scheduled tasks do I have?", "intent": "list"}
+{"category": "housekeeping", "text": "show my timers", "intent": "list"}
+{"category": "housekeeping", "text": "cancel all scheduled tasks", "intent": "cancel"}
+{"category": "comfort", "text": "it's stuffy in here", "intent": "need_target"}
+{"category": "comfort", "text": "the bedroom is freezing", "intent": "control", "device": "ac_bedroom", "actions": [["power", true], ["mode", "heat"], ["temperature", 24]]}
+{"category": "comfort", "text": "too loud", "intent": "need_target"}
+{"category": "negative", "text": "hello there", "intent": "unknown"}
+{"category": "negative", "text": "what's the weather like", "intent": "unknown"}
+{"category": "negative", "text": "play some music", "intent": "unknown"}

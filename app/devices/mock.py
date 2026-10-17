@@ -114,15 +114,15 @@ class MockAdapter(DeviceAdapter):
             return {"ok": False, "applied": [], "error": f"Device {device_id} not found"}
 
         applied = []
-        dtype = next((d["type"] for d in DEVICES if d["id"] == device_id), "")
-        caps = CAPABILITIES.get(dtype, ["power"])
+        dev = next((d for d in DEVICES if d["id"] == device_id), {"type": "", "name": device_id})
+        caps = CAPABILITIES.get(dev["type"], ["power"])
         with self._lock:
             st = self._states[device_id]
             for act in actions:
                 name, value = act.get("action"), act.get("value")
                 if name not in caps:
                     return {"ok": False, "applied": applied,
-                            "error": f"{device_id} does not support '{name}'"}
+                            "error": f"{dev['name']} does not support '{name}'"}
                 if name == "power":
                     st["power"] = bool(value)
                     if device_id.startswith("ac_") and value:

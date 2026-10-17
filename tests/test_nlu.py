@@ -134,7 +134,8 @@ class ScheduleTest(unittest.TestCase):
 
     def test_time_without_action_asks_for_one(self):
         r = parse("at 11 pm")
-        self.assertEqual(r["intent"], "unknown")
+        self.assertEqual(r["intent"], "need_action")
+        self.assertEqual(r["missing"], "action")
         self.assertTrue(r["clarify"])
 
 
@@ -161,8 +162,9 @@ class QueryTest(unittest.TestCase):
 
     def test_control_without_device_asks_which_one(self):
         r = parse("set the temperature to 24")
-        self.assertEqual(r["intent"], "unknown")
-        self.assertIn("Which device", r["clarify"])
+        self.assertEqual(r["intent"], "need_target")
+        self.assertEqual(r["missing"], "target")
+        self.assertIn("Which", r["clarify"])
 
 
 class HousekeepingTest(unittest.TestCase):
