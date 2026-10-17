@@ -1,5 +1,5 @@
-# 核心功能零依赖 —— 只用 Python 标准库，装好 Python 就能跑。
-# 以下为可选增强，按需安装。
+# The core has zero dependencies -- standard library only. Install Python and run.
+# Everything below is optional.
 
-# 接入真实 LG 家电（官方 ThinQ Open API SDK）
+# Real LG appliances via the official ThinQ Open API SDK (see docs section 5)
 # thinqconnect>=1.0.14

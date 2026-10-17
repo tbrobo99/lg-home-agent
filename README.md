@@ -332,7 +332,7 @@ and malformed JSON fall back to the rule engine, so the assistant never stalls.
 
 | Layer | Choice | Why |
 |---|---|---|
-| Language | Python 3.9+ | stdlib only for the core |
+| Language | Python 3.10+ | stdlib only for the core |
 | Server | `http.server` | no framework needed for a local single-user app |
 | Storage | SQLite (stdlib) | durable jobs, zero setup |
 | Scheduling | custom 1 Hz thread | full control over persistence and retry |
