@@ -263,5 +263,27 @@ class CatchUpTest(AgentTestBase):
         self.assertEqual(job["next_run_at"], future)
 
 
+class PhrasingTest(unittest.TestCase):
+    def test_single_action_keeps_the_device_name(self):
+        txt = Agent.phrase("Living Room AC", [{"action": "power", "value": False}])
+        self.assertEqual(txt, "turn off the Living Room AC")
+
+    def test_multiple_actions_name_the_device_once(self):
+        txt = Agent.phrase("Living Room AC", [
+            {"action": "temperature", "value": 24},
+            {"action": "fan", "value": "low"},
+        ])
+        self.assertEqual(txt.count("Living Room AC"), 1, txt)
+        self.assertIn("24\u00b0C", txt)
+        self.assertIn("low", txt)
+
+    def test_mode_and_fan_read_as_one_sentence(self):
+        txt = Agent.phrase("Living Room AC", [
+            {"action": "mode", "value": "heat"},
+            {"action": "fan", "value": "low"},
+        ])
+        self.assertEqual(txt, "switch the Living Room AC to heating, fan low")
+
+
 if __name__ == "__main__":
     unittest.main()

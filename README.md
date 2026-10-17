@@ -206,7 +206,7 @@ lg-home-agent/
 │   ├── server.py           HTTP server (stdlib)
 │   ├── devices/            adapter interface + mock + ThinQ
 │   └── web/                UI
-├── tests/                  59 unit tests, stdlib only
+├── tests/                  62 unit tests, stdlib only
 ├── eval/                   reproducible intent-parser benchmark
 │   ├── dataset.jsonl       56 labelled utterances, fixed clock
 │   └── run.py              accuracy per category, `--min` for CI
@@ -346,7 +346,7 @@ and malformed JSON fall back to the rule engine, so the assistant never stalls.
 
 ### Unit tests
 
-59 tests, standard library only — no pytest, no fixtures, no network:
+62 tests, standard library only — no pytest, no fixtures, no network:
 
 ```bash
 python -m unittest discover -s tests -v

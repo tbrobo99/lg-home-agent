@@ -344,23 +344,45 @@ class Agent:
         return ", ".join(describe_action(a) for a in actions)
 
     @staticmethod
+    @staticmethod
+    def _phrase_one(device_name: str, name, value, with_name: bool = True) -> str:
+        """One action as a clause. `with_name` is off for every action after the
+        first, so a two-action command does not repeat the device name."""
+        if name == "power":
+            verb = "on" if value else "off"
+            return f"turn {verb} the {device_name}" if with_name else f"turn {verb}"
+        if name == "temperature":
+            return (f"set the {device_name} to {value}\u00b0C" if with_name
+                    else f"{value}\u00b0C")
+        if name == "mode":
+            label = MODE_LABELS.get(value, value)
+            return (f"switch the {device_name} to {label}" if with_name
+                    else f"switch to {label}")
+        if name == "fan":
+            label = FAN_LABELS.get(value, value)
+            return (f"set the {device_name} fan to {label}" if with_name
+                    else f"fan {label}")
+        return f"{name}={value}"
+
+    @staticmethod
     def phrase(device_name: str, actions: list[dict]) -> str:
         """Turn an action list into a readable phrase, e.g.
-        'turn off the Living Room AC and set it to 24°C'."""
-        parts = []
-        for a in actions:
-            n, v = a.get("action"), a.get("value")
-            if n == "power":
-                parts.append(f"turn {'on' if v else 'off'} the {device_name}")
-            elif n == "temperature":
-                parts.append(f"set the {device_name} to {v}\u00b0C")
-            elif n == "mode":
-                parts.append(f"switch the {device_name} to {MODE_LABELS.get(v, v)}")
-            elif n == "fan":
-                parts.append(f"set the {device_name} fan to {FAN_LABELS.get(v, v)}")
-            else:
-                parts.append(f"{n}={v}")
-        return " and ".join(parts)
+        'turn off the Living Room AC' or
+        'set the Living Room AC to 24°C, fan low'.
+
+        The device name appears once. Repeating it per verb produced replies
+        like "switch the AC to heating and set the AC fan to low", which reads
+        as a stutter rather than a sentence.
+        """
+        if not actions:
+            return f"nothing to the {device_name}"
+
+        first = actions[0]
+        parts = [Agent._phrase_one(device_name, first.get("action"),
+                                   first.get("value"), with_name=True)]
+        parts += [Agent._phrase_one(device_name, a.get("action"), a.get("value"),
+                                    with_name=False) for a in actions[1:]]
+        return ", ".join(parts)
 
     @staticmethod
     def brief(device: dict, state: dict) -> str:
