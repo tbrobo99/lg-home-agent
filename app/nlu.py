@@ -343,7 +343,7 @@ def match_device(text: str, devices: list[dict], default_room: str = "",
 # ---------------------------------------------------------------- actions
 
 OFF_RE = re.compile(
-    r"\b(turn|switch|power)\b[^.?!]{0,24}?\boff\b"
+    r"\b(turn|switch|power|shut)\b[^.?!]{0,24}?\boff\b"
     r"|\bshut\s+(?:it\s+|them\s+)?(?:down|off)\b"
     r"|\b(stop|kill|deactivate|disable)\b", re.I)
 ON_RE = re.compile(

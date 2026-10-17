@@ -20,8 +20,8 @@ import re
 from datetime import datetime
 
 from . import db, nlu
-from .devices.base import (FAN_LABELS, MODE_LABELS, describe_action,
-                           normalize_action)
+from .devices.base import (FAN_LABELS, MODE_LABELS, capabilities_of,
+                           describe_action, normalize_action, temperature_range)
 
 ALLOWED_ACTIONS = ("power", "temperature", "mode", "fan")
 _TRUE = {"true", "on", "yes", "1"}
@@ -78,8 +78,9 @@ TOOL_SCHEMAS: list[dict] = [
                                 "action": {"type": "string", "enum": list(ALLOWED_ACTIONS)},
                                 "value": {
                                     "description": "true/false for power, an integer "
-                                                   "16-30 for temperature, a string for "
-                                                   "mode or fan",
+                                                   "in the device's temperature_range "
+                                                   "for temperature (see list_devices), "
+                                                   "a string for mode or fan",
                                 },
                             },
                             "required": ["action", "value"],
@@ -204,15 +205,21 @@ class ToolBox:
         known = [{"id": d["id"], "name": d["name"]} for d in self._devices()]
         return {"error": f"no device with id {device_id!r}", "devices": known}
 
-    def _clean_actions(self, actions) -> tuple[list[dict], str | None]:
+    def _clean_actions(self, actions, device: dict) -> tuple[list[dict], str | None]:
         """Coerce what the model sends into the shapes the adapter accepts.
 
         Small models routinely emit `"power": "false"` or `"temperature": "24"`.
         Rejecting those would burn a step and teach nothing, so they are coerced;
         only values that cannot be read unambiguously are refused.
+
+        The temperature window comes from the device, not from a constant. A
+        fridge holds 1–7 °C and an AC 16–30 °C, and validating both against one
+        range is what made "the fridge is too warm" impossible to answer.
         """
         if not isinstance(actions, list) or not actions:
             return [], "actions must be a non-empty array"
+        lo, hi = temperature_range(device)
+        caps = capabilities_of(device)
         out = []
         for raw in actions:
             if not isinstance(raw, dict):
@@ -223,6 +230,9 @@ class ToolBox:
             if name not in ALLOWED_ACTIONS:
                 return [], (f"unknown action {name!r}; use one of "
                             f"{', '.join(ALLOWED_ACTIONS)}")
+            if name not in caps:
+                return [], (f"{device.get('name', 'this device')} does not support "
+                            f"{name!r}; it supports {', '.join(caps)}")
 
             if name == "power":
                 if isinstance(value, bool):
@@ -241,8 +251,9 @@ class ToolBox:
                     value = int(round(float(value)))
                 except (TypeError, ValueError):
                     return [], "temperature must be a whole number"
-                if not 16 <= value <= 30:
-                    return [], "temperature must be between 16 and 30"
+                if not lo <= value <= hi:
+                    return [], (f"temperature for this device must be between "
+                                f"{lo} and {hi} \u00b0C")
 
             elif name == "mode":
                 value = str(value).strip().lower()
@@ -263,27 +274,38 @@ class ToolBox:
         out = []
         for d in self._devices():
             state = self._state(d["id"])
-            out.append({
+            caps = capabilities_of(d)
+            item = {
                 "id": d["id"],
                 "name": d["name"],
                 "room": d.get("room", ""),
                 "type": d.get("type_label") or d.get("type"),
                 "online": d.get("online", True),
                 "power": state.get("power"),
-            })
+                "supports": caps,
+            }
+            if "temperature" in caps:
+                lo, hi = temperature_range(d)
+                item["temperature_range"] = f"{lo}-{hi} \u00b0C"
+            out.append(item)
         return {"devices": out}
 
     def _t_get_state(self, device_id: str = "") -> dict:
         d = self._find(device_id)
         if not d:
             return self._unknown_device(device_id)
-        return {
+        caps = capabilities_of(d)
+        out = {
             "device": d["name"],
             "room": d.get("room", ""),
             "online": d.get("online", True),
-            "capabilities": d.get("capabilities") or [],
+            "supports": caps,
             "state": self._state(d["id"]),
         }
+        if "temperature" in caps:
+            lo, hi = temperature_range(d)
+            out["temperature_range"] = f"{lo}-{hi} \u00b0C"
+        return out
 
     def _t_control(self, device_id: str = "", actions=None) -> dict:
         d = self._find(device_id)
@@ -292,9 +314,11 @@ class ToolBox:
         if not d.get("online", True):
             return {"error": f"{d['name']} is offline, nothing was sent"}
 
-        clean, err = self._clean_actions(actions)
+        clean, err = self._clean_actions(actions, d)
         if err:
-            return {"error": err}
+            return {"error": err, "supports": capabilities_of(d),
+                    "temperature_range": "-".join(
+                        str(x) for x in temperature_range(d)) + " \u00b0C"}
 
         res = self.adapter.apply(d["id"], clean)
         if not res.get("ok"):
@@ -317,9 +341,11 @@ class ToolBox:
         if not d:
             return self._unknown_device(device_id)
 
-        clean, err = self._clean_actions(actions)
+        clean, err = self._clean_actions(actions, d)
         if err:
-            return {"error": err}
+            return {"error": err, "supports": capabilities_of(d),
+                    "temperature_range": "-".join(
+                        str(x) for x in temperature_range(d)) + " \u00b0C"}
 
         # The guardrail: the model hands over the words, not a timestamp.
         rule, label = nlu.build_rule(str(when_text or ""), self.now)

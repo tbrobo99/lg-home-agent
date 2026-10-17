@@ -16,11 +16,31 @@ CAPABILITIES: dict[str, list[str]] = {
     "air_purifier": ["power", "fan"],
     "washer": ["power"],
     "dryer": ["power"],
-    "refrigerator": ["power"],
+    "refrigerator": ["power", "temperature"],
     "dish_washer": ["power"],
     "water_heater": ["power", "temperature"],
     "dehumidifier": ["power", "fan"],
 }
+
+# A setpoint is not one range. 22 °C is a comfortable room and a fridge disaster;
+# a fridge at 3 °C is correct and an AC at 3 °C is nonsense. Keeping a single
+# 16–30 window in the tool schema made "the fridge is too warm" unanswerable:
+# the model had no valid value to send, so it sent something else.
+TEMPERATURE_RANGE: dict[str, tuple[int, int]] = {
+    "air_conditioner": (16, 30),
+    "refrigerator": (1, 7),
+    "water_heater": (30, 60),
+}
+DEFAULT_TEMPERATURE_RANGE = (16, 30)
+
+
+def temperature_range(device: dict) -> tuple[int, int]:
+    return TEMPERATURE_RANGE.get(device.get("type", ""), DEFAULT_TEMPERATURE_RANGE)
+
+
+def capabilities_of(device: dict) -> list[str]:
+    return list(device.get("capabilities")
+                or CAPABILITIES.get(device.get("type", ""), ["power"]))
 
 TYPE_LABELS = {
     "air_conditioner": "Air Conditioner",

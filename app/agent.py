@@ -45,6 +45,9 @@ SETTING_RE = re.compile(
     r"|\b(?:low|mid|medium|high)\b",
     re.I)
 
+# Where one sentence can hold two requests.
+CLAUSE_SPLIT_RE = re.compile(r"\s+and\s+|\s*,\s*(?:and\s+)?|\s+then\s+", re.I)
+
 
 class Agent:
     def __init__(self, adapter, cfg: dict) -> None:
@@ -124,6 +127,50 @@ class Agent:
 
     # ------------------------------------------------ tool loop
 
+    def _clauses_disagree(self, text: str, intent: dict,
+                          devices: list[dict], now: datetime) -> bool:
+        """Does this sentence ask for things one flat action list cannot express?
+
+        "cool the bedroom down and shut the living room off" is two requests: a
+        mode for one room and a power state for another. The rules produce one
+        action list and one target list, so they apply `mode=cool` to all three
+        devices and never turn anything off — a confident half-answer that reads
+        exactly like a complete one. That is the worst failure mode in the
+        cascade, because nothing downstream can tell it went wrong.
+
+        The signal is not "the sentence contains and". It is that two clauses,
+        each able to stand on its own, want *different* things. "turn off the
+        living room AC and the bedroom AC" also has two clauses, but both want
+        power off, and one flat list expresses that precisely.
+
+        Each clause is parsed with no default room and no fallback device, so a
+        clause only counts when it names its own device. That keeps "turn on the
+        AC and set it to 24" out of the loop: "set it to 24" cannot stand alone.
+        """
+        if intent["intent"] not in ("control", "schedule"):
+            return False
+        parts = [p.strip() for p in CLAUSE_SPLIT_RE.split(text) if p.strip()]
+        if len(parts) < 2:
+            return False
+
+        subs = []
+        for part in parts:
+            sub = nlu.parse(part, devices, now, "", None)
+            if sub["intent"] in ("control", "schedule") and sub.get("targets"):
+                subs.append(sub)
+        if len(subs) < 2:
+            return False
+
+        # two schedules cannot share the one rule a single intent carries
+        if sum(1 for s in subs if s["intent"] == "schedule") >= 2:
+            return True
+
+        def shape(sub: dict) -> frozenset:
+            return frozenset((a.get("action"), str(a.get("value")))
+                             for a in sub.get("actions") or [])
+
+        return len({shape(s) for s in subs}) > 1
+
     def _escalate(self, text: str, intent: dict, devices: list[dict],
                   default_room: str, now: datetime) -> dict | None:
         """Hand a request the rules could not finish to a model.
@@ -151,6 +198,15 @@ class Agent:
             return None
 
         kind = intent["intent"]
+
+        # A compound sentence whose clauses want different things has to go to
+        # the loop: a single intent cannot carry two action lists, and tier 2's
+        # schema is even flatter.
+        if self._clauses_disagree(text, intent, devices, now):
+            loop = agent_loop.run(self.cfg, text, self.adapter, now, default_room)
+            if loop.get("handled"):
+                return loop
+            return None
 
         if kind == "unknown" and SETTING_RE.search(text) \
                 and not WHOLE_HOME_RE.search(text):

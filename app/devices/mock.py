@@ -12,7 +12,7 @@ import random
 import threading
 from pathlib import Path
 
-from .base import CAPABILITIES, TYPE_LABELS, DeviceAdapter
+from .base import CAPABILITIES, TYPE_LABELS, DeviceAdapter, temperature_range
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 STATE_PATH = ROOT / "data" / "mock_state.json"
@@ -139,10 +139,19 @@ class MockAdapter(DeviceAdapter):
                         st["state"] = "washing" if value else "standby"
                         st["remaining_min"] = 45 if value else 0
                 elif name == "temperature":
+                    lo, hi = temperature_range(dev)
                     try:
-                        st["target_temp"] = max(16, min(30, int(float(value))))
+                        value = int(round(float(value)))
                     except (TypeError, ValueError):
                         return {"ok": False, "applied": applied, "error": "Invalid temperature"}
+                    if not lo <= value <= hi:
+                        return {"ok": False, "applied": applied,
+                                "error": f"{dev['name']} takes {lo}-{hi}\u00b0C, not {value}"}
+                    # a fridge has a compartment setpoint, not a room setpoint
+                    if dev["type"] == "refrigerator":
+                        st["fridge_temp"] = value
+                    else:
+                        st["target_temp"] = value
                 elif name == "mode":
                     if value in ("cool", "heat", "dry", "fan", "auto"):
                         st["mode"] = value

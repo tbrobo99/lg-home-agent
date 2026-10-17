@@ -230,6 +230,135 @@ class GuardrailTests(LoopTestBase):
         self.assertEqual(self.fake.requests, [])
 
 
+class CapabilityTests(LoopTestBase):
+    """A setpoint is not one number across the house.
+
+    The tool schema used to say "16-30 for temperature", which is an air
+    conditioner's range. A fridge is correct at 3 °C, so "the fridge is too
+    warm" had no valid value to send and the model sent something else. The
+    range now comes from the device.
+    """
+
+    def test_fridge_accepts_its_own_range(self):
+        self.fake.script = [
+            tool_call("control", device_id="fridge",
+                      actions=[{"action": "temperature", "value": 4}]),
+            tool_call("finish", reply="Fridge is at 4°C."),
+        ]
+        result = self.run_loop("the fridge is too warm, make it colder")
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(self.state("fridge")["fridge_temp"], 4)
+
+    def test_fridge_refuses_an_air_conditioner_temperature(self):
+        self.fake.script = [
+            tool_call("control", device_id="fridge",
+                      actions=[{"action": "temperature", "value": 22}]),
+            tool_call("finish", reply="Cannot do that."),
+        ]
+        result = self.run_loop("the fridge is too warm")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(self.state("fridge")["fridge_temp"], 3)  # unchanged
+        refused = self.fake.requests[1]["messages"]
+        self.assertTrue(any("1-7" in str(m.get("content"))
+                            for m in refused if m.get("role") == "tool"))
+
+    def test_ac_still_refuses_a_fridge_temperature(self):
+        """The range is per device in both directions, not a wider window."""
+        self.fake.script = [
+            tool_call("control", device_id="ac_living",
+                      actions=[{"action": "temperature", "value": 3}]),
+            tool_call("finish", reply="Too cold."),
+        ]
+        result = self.run_loop("the living room is far too warm")
+
+        self.assertFalse(result["ok"])
+        self.assertNotEqual(self.state("ac_living")["target_temp"], 3)
+
+    def test_supported_actions_come_from_the_device(self):
+        """The error tells the model what this device can do, so the next step
+        can pick an action that exists."""
+        self.fake.script = [
+            tool_call("control", device_id="washer",
+                      actions=[{"action": "mode", "value": "cool"}]),
+            tool_call("finish", reply="Cannot do that."),
+        ]
+        self.run_loop()
+
+        observation = self.fake.requests[1]["messages"]
+        self.assertTrue(any("does not support" in str(m.get("content"))
+                            for m in observation if m.get("role") == "tool"))
+
+
+class ClauseTests(LoopTestBase):
+    """One intent, one action list, one target list.
+
+    "cool the bedroom down and shut the living room off" is two requests. The
+    rules cannot carry two action lists, so they applied `mode=cool` to all
+    three devices and switched nothing off — an answer that reads as complete and
+    is half wrong. Those sentences belong to the loop.
+    """
+
+    def _disagree(self, text: str) -> bool:
+        devices = self.adapter.list_devices()
+        intent = nlu.parse(text, devices, self.now, "Living Room", None)
+        return Agent(self.adapter, self.cfg)._clauses_disagree(
+            text, intent, devices, self.now)
+
+    def test_two_clauses_wanting_different_things_are_escalated(self):
+        self.assertTrue(
+            self._disagree("cool the bedroom down and shut the living room off"))
+
+    def test_two_clauses_wanting_the_same_thing_are_not(self):
+        """"turn off X and Y" is one flat action list, which is exactly what the
+        rules can express — escalating it would only add latency."""
+        self.assertFalse(
+            self._disagree("turn off the living room AC and the bedroom AC"))
+
+    def test_a_pronoun_clause_is_not_a_second_request(self):
+        """"set it to 24" cannot stand alone, so it does not count."""
+        self.assertFalse(self._disagree("turn on the AC and set it to 24"))
+
+    def test_two_schedules_cannot_share_one_rule(self):
+        self.assertTrue(self._disagree(
+            "turn off the AC at 11 pm and turn on the purifier now"))
+
+    def test_ordinary_sentences_are_untouched(self):
+        for text in ("set everything in the living room to 24 degrees",
+                     "turn off the AC every night at 11 pm",
+                     "switch the AC to heat and fan low",
+                     "the bedroom is a sauna, sort it out"):
+            self.assertFalse(self._disagree(text), text)
+
+    def test_the_escalated_sentence_actually_does_both_halves(self):
+        self.fake.script = [
+            tool_call("control", device_id="ac_living",
+                      actions=[{"action": "power", "value": False}]),
+            tool_call("control", device_id="ac_bedroom",
+                      actions=[{"action": "mode", "value": "cool"}]),
+            tool_call("finish", reply="Cooled the bedroom, shut the living room."),
+        ]
+        agent = Agent(self.adapter, self.cfg)
+        result = agent.handle("cool the bedroom down and shut the living room off")
+
+        self.assertEqual(result["intent_name"], "agent_loop")
+        self.assertFalse(self.state("ac_living")["power"])
+        self.assertEqual(self.state("ac_bedroom")["mode"], "cool")
+
+
+class ShutOffTests(LoopTestBase):
+    """`shut the living room off` used to parse as unknown: OFF_RE only accepted
+    "shut" next to "off", not "shut <device> off"."""
+
+    def test_shut_a_device_off_is_understood(self):
+        agent = Agent(self.adapter, self.cfg)
+        result = agent.handle("shut the living room off")
+
+        self.assertEqual(result["intent_name"], "control")
+        self.assertFalse(self.state("ac_living")["power"])
+
+
 class CascadeTests(LoopTestBase):
     def test_agent_reaches_tier_three_when_the_parser_fails(self):
         self.fake.script = [
@@ -300,24 +429,41 @@ class ProseBeforeActingTests(LoopTestBase):
 
         # the nudge must reach the model, and only once
         nudged = self.fake.requests[1]["messages"]
-        self.assertTrue(any("did not call a tool" in str(m.get("content"))
+        self.assertTrue(any("Nothing has been changed yet" in str(m.get("content"))
                             for m in nudged))
 
-    def test_prose_twice_is_accepted_as_the_answer(self):
-        """Some questions need no tool ("what can you do?"), so the nudge is a
-        single retry, not a loop that never lets the model speak."""
+    def test_prose_twice_is_refused_not_echoed(self):
+        """Some questions need no tool, so the nudge is a single retry — but a
+        claim with nothing behind it is not an answer. It is a report the loop
+        cannot stand behind, and echoing it is worse than saying nothing."""
         self.fake.script = [
             prose("I can control the AC, purifier, washer and fridge."),
             prose("I can control the AC, purifier, washer and fridge."),
         ]
         result = self.run_loop("what sort of things can you do around here")
 
-        self.assertTrue(result["handled"])
-        self.assertIn("I can control", result["reply"])
+        self.assertFalse(result["handled"])
         self.assertEqual(result["steps"], 2)
 
-    def test_prose_after_a_tool_is_accepted_immediately(self):
-        """Once something has actually happened, a closing sentence is a reply."""
+    def test_a_claim_with_nothing_behind_it_is_refused(self):
+        """The worst failure seen live. Asked to "wake the house up", the model
+        called list_devices, then wrote "The house has been woken up. The Living
+        Room AC, Bedroom AC..." and stopped. Every device was still off, and the
+        user was told the opposite."""
+        self.fake.script = [
+            tool_call("list_devices"),
+            prose("The house has been woken up. The Living Room AC, Bedroom AC, "
+                  "Living Room Purifier and Balcony Washer are all on."),
+            prose("The house has been woken up."),
+        ]
+        result = self.run_loop("wake the house up")
+
+        self.assertFalse(result["handled"])
+        self.assertFalse(self.state("ac_living")["power"])
+        self.assertFalse(self.state("ac_bedroom")["power"])
+
+    def test_a_closing_sentence_after_work_is_a_real_answer(self):
+        """Once something has actually happened, prose is a legitimate reply."""
         self.fake.script = [
             tool_call("control", device_id="purifier",
                       actions=[{"action": "power", "value": True}]),
@@ -325,6 +471,7 @@ class ProseBeforeActingTests(LoopTestBase):
         ]
         result = self.run_loop("the air in here is disgusting")
 
+        self.assertTrue(result["handled"])
         self.assertEqual(result["steps"], 2)
         self.assertEqual(result["reply"], "The purifier is running now.")
         self.assertTrue(self.state("purifier")["power"])
@@ -340,6 +487,54 @@ class ProseBeforeActingTests(LoopTestBase):
         result = self.run_loop("the air in here is disgusting")
 
         self.assertEqual(result["reply"], "The purifier is running now.")
+
+    def test_describing_a_tool_result_is_not_doing_the_work(self):
+        """Live regression: asked to "wake the house up", the model called
+        list_devices, wrote "The house has the following devices: ..." and
+        stopped. It had reported and not acted, and prose was accepted."""
+        self.fake.script = [
+            tool_call("list_devices"),
+            prose("The house has the following devices: Living Room AC, "
+                  "Bedroom AC, Living Room Purifier, Balcony Washer."),
+            tool_call("control", device_id="ac_living",
+                      actions=[{"action": "power", "value": True}]),
+            tool_call("finish", reply="Living Room AC is on."),
+        ]
+        result = self.run_loop("wake the house up")
+
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(self.state("ac_living")["power"])
+        self.assertEqual(result["reply"], "Living Room AC is on.")
+
+    def test_recovery_prose_is_not_shown_as_the_answer(self):
+        """Live regression: asked to schedule something, the model said "I
+        apologize for the oversight, I will now call the control function" --
+        and that sentence became the reply while nothing was scheduled."""
+        self.fake.script = [
+            tool_call("list_devices"),
+            prose("I apologize for the oversight. I will now call the "
+                  "`control` function."),
+            tool_call("schedule", device_id="ac_living",
+                      actions=[{"action": "power", "value": False}],
+                      when_text="in 20 minutes"),
+            tool_call("finish", reply="Scheduled."),
+        ]
+        result = self.run_loop("put the living room to sleep in 20 minutes")
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(len(db.list_jobs()), 1)
+        self.assertEqual(result["reply"], "Scheduled.")
+
+    def test_a_question_with_no_tool_gets_no_free_pass(self):
+        """A question the loop cannot answer is refused, not echoed: the caller
+        keeps its own honest reply."""
+        self.fake.script = [
+            prose("I can control the AC, purifier, washer and fridge."),
+            prose("I can control the AC, purifier, washer and fridge."),
+        ]
+        result = self.run_loop("what sort of things can you do around here")
+
+        self.assertFalse(result["handled"])
 
 
 class SummaryTests(LoopTestBase):

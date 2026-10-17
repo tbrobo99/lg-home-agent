@@ -40,17 +40,22 @@ Rules:
 2. One `control` call per device, but you may emit several calls in one turn.
    For a whole-home request, emit one `control` per device together. Devices
    cannot be created or renamed.
-3. For anything that happens later, call `schedule` and pass the time as the user
-   said it ("every night at 11 pm"). Never convert it to a clock time yourself —
-   a deterministic parser does that, and it will reject what it cannot read.
+3. If the user gives any time — "at 11 pm", "in 20 minutes", "tomorrow", "every
+   night" — the work happens THEN, so call `schedule`, never `control`. Pass the
+   time as the user said it; never convert it to a clock time yourself, because
+   a deterministic parser does that and it will reject what it cannot read.
 4. If the request is genuinely ambiguous, call `ask_user` with one short question.
+   A whole-home request is not ambiguous: see rule 8.
 5. When the work is done, call `finish` with one short sentence.
 6. Never claim something happened unless a tool said it did.
 7. If the user describes a problem and one device plainly fixes it, fix it. Do
    not offer to: "the air in here is disgusting" is a request, not a question.
-8. "The flat", "the house", "the whole place", "everything" means every device.
-   Call `list_devices` and control each one — do not ask which device is meant.
-9. Never reply with your reasoning. Say what you did, or call a tool."""
+8. "The flat", "the house", "the whole place", "the home", "everything", "the
+   lot" means EVERY device. Call `list_devices`, then call `control` on each one
+   that fits. Never ask which device is meant — there is no missing device.
+9. Different devices may need different actions in one request: cooling one room
+   while switching another off is normal. Do not apply one action to all.
+10. Never reply with your reasoning. Say what you did, or call a tool."""
 
 
 def available(cfg: dict) -> bool:
@@ -108,28 +113,37 @@ def run(cfg: dict, text: str, adapter, now: datetime,
     try:
         while steps < MAX_STEPS and time.monotonic() < deadline:
             steps += 1
-            msg = llm.chat(cfg, messages, tools=TOOL_SCHEMAS, max_tokens=800)
+            # temperature 0: the same sentence reached the loop twice and took
+            # different paths, and a demo does not survive that.
+            msg = llm.chat(cfg, messages, tools=TOOL_SCHEMAS, temperature=0,
+                           max_tokens=800)
             calls = msg.get("tool_calls") or []
 
             if not calls:
                 reply = clean_reply(msg.get("content") or "")
-                # Prose before any tool call is usually the model narrating its
-                # own confusion, not answering: glm-4-flash has replied to "the
-                # air is disgusting" with "would you like me to…" and to "get
-                # the flat ready for bed" with "the request is not clear". One
-                # nudge, then prose is accepted — "what can you do?" is a real
-                # question that needs no tool.
-                if reply and not box.calls and not nudged:
+                # Reporting is not doing. Asked to "wake the house up", the model
+                # called list_devices, then wrote "The house has been woken up.
+                # The Living Room AC, Bedroom AC..." and stopped — a claim with
+                # nothing behind it, which is worse than no answer at all. One
+                # nudge first, in case the model is about to act.
+                if reply and not nudged and not box.targets and not box.question:
                     nudged = True
                     messages.append({"role": "assistant", "content": reply})
                     messages.append({"role": "user", "content":
-                                     "You did not call a tool. If the user asked for "
-                                     "something to happen, call a tool now. If they "
-                                     "only asked a question, answer it and call finish."})
+                                     "Nothing has been changed yet. If the user "
+                                     "asked for something to happen, call a tool "
+                                     "now. If they only asked a question, answer "
+                                     "it and call finish."})
                     continue
-                if reply:
+                if not reply:
+                    break
+                if box.question:
+                    return _result(box, box.question, steps, messages, awaiting=True)
+                if box.targets:
                     return _result(box, reply, steps, messages)
-                break
+                # Still nothing done, and no question asked. Admit it.
+                db.log("agent.loop", f"no action, no question, gave up: {reply!r}")
+                return {"handled": False, "steps": steps}
 
             messages.append({
                 "role": "assistant",
