@@ -9,6 +9,10 @@ living room AC every night at 11 pm"* becomes a durable task that actually fires
 It ships as a phone app: an installable PWA you can add to the home screen, and the
 same files package into an Android APK with Capacitor. No framework, no build step.
 
+It answers in three tiers — deterministic rules for what they cover, a single model call
+for the rest, and a bounded tool loop for requests that need to look at the house before
+deciding. Section 2 explains why that order is the point.
+
 <img src="docs/screenshot.png" width="330" alt="Devices screen"> <img src="docs/screenshot-chat.png" width="330" alt="Assistant screen">
 
 ```
@@ -49,6 +53,9 @@ Agent  Scheduled — every day at 23:00: turn off the Living Room AC.
 | Manage schedules | `what scheduled tasks do I have?` · `cancel all` |
 | **Several devices at once** | `set everything in the living room to 24 degrees` · `turn off all the ACs` |
 | **Dialogue state** | `it's stuffy in here` → `Which room?` → `bedroom` |
+| **Goals, not commands** | `the bedroom is a sauna, sort it out` → reads the room, then cools it |
+| **Whole-home in one breath** | `everything off, I'm leaving` → all five devices |
+| **Looks before it acts** | `the air in here is disgusting` → checks PM2.5, runs the purifier |
 | **Phone app** | installable PWA: room tabs, a per-device control sheet, one-tap quick actions |
 
 It understands times as people actually say them: `10:30 pm`, `at 7 am tomorrow`,
@@ -56,7 +63,7 @@ It understands times as people actually say them: `10:30 pm`, `at 7 am tomorrow`
 
 ---
 
-## 2. Four design decisions worth defending
+## 2. Six design decisions worth defending
 
 ### The language model is not the timer
 
@@ -99,16 +106,54 @@ On startup the scheduler reconciles instead of guessing:
 Nothing is replayed. Firing *"turn off the AC"* three hours late is not a fix, it is a
 second bug. The rule is: **never silently skip, never silently catch up.**
 
-### Rules first, LLM second
+### Three tiers, and why the model is not the first one
 
-`app/nlu.py` is a rule engine: time expressions, recurrence, device resolution, actions.
-It is deterministic, testable, offline, and costs nothing.
+`app/nlu.py` is a rule engine: time expressions, recurrence, device resolution,
+actions. It is deterministic, testable, offline, and costs nothing. Misreading
+`half past ten` turns the AC on at the wrong hour, and that is not a failure mode
+worth handing to a probabilistic model.
 
-This is not about saving money. Misreading `half past ten` turns the AC on at the wrong
-hour, and that is not a failure mode worth handing to a probabilistic model. The LLM
-(`app/llm.py`, optional, off by default) only covers the long tail — *"it feels stuffy in
-here"* — and its output is validated before execution; anything malformed is discarded
-and the rule result stands.
+But rules only cover what someone thought to write. Behind them sit two model
+tiers, and the decision that matters is not that there are two — it is which
+request goes where:
+
+| tier | where | latency | can see | can do |
+|---|---|---|---|---|
+| 1 rules | `nlu.py` | ~1 ms | the sentence | one deterministic parse |
+| 2 single-shot | `llm.plan` | ~3 s | sentence + device list | one device, one flat action list |
+| 3 tool loop | `agent_loop.py` | 3–18 s | live state, a device at a time | several devices, re-plan, ask |
+
+Tier 2 is blind: it never sees a device's state, and its schema holds a single
+device. So the router (`Agent._escalate`) does not ask the model how confident it
+feels. It decides from the request:
+
+- **A literal command** — the user named the value, so the only open question is
+  *which* device — gets the cheap single pass; a device list answers that.
+- **A goal** — *"the bedroom is a sauna"* — goes straight to the loop. The right
+  action depends on a temperature no single pass can see, and a plan that guesses
+  it is a guess wearing a JSON schema.
+- **The home as a whole** — *"everything off"* — never touches tier 2, which
+  could only do one room and report success.
+
+This ordering is the argument. Put tier 2 first unconditionally and it answers
+everything, plausibly, and the loop becomes dead code that still looks installed —
+which is how a lot of "agent" demos turn out to be one prompt with extra steps.
+
+### The loop can be wrong, but it cannot corrupt anything
+
+Tier 3 is the only place a model may *act*. It acts through `tools.ToolBox`, which
+validates every argument before the adapter sees it. Three rules hold it together,
+and each one comes from a failure that actually happened:
+
+| rule | the failure it prevents |
+|---|---|
+| The model never supplies a timestamp | `schedule` takes the user's own words (*"every night at 11 pm"*) and hands them to `nlu.build_rule`. A model that invents `23:30` has no field to put it in — the call comes back `bad arguments`. |
+| A bad device id is an observation, not an exception | Asked for the bedroom AC, `glm-4-flash` answered `bedroom_ac`; the real id is `ac_bedroom`. The tool returns the valid ids, the next step reads them and corrects itself. |
+| Errors are values | Every tool returns `{"error": …}` and the loop appends it as a `tool` message. The model sees its own mistake — that is the difference between a loop and a pipeline. |
+
+Two budgets bound the whole thing: 8 steps and 25 seconds. If it runs out with
+nothing done it returns `handled: False`, and the caller keeps its "I did not
+catch that" reply. A loop that answers anyway is worse than one that admits it.
 
 ### A sentence can be about more than one device
 
@@ -189,8 +234,10 @@ From there, *Add to Home Screen* installs it as a standalone app. See
 │  server.py   — routes, static files          │
 ├──────────────────────────────────────────────┤
 │  agent.py    — understand → decide → execute │
-│    ├── nlu.py   rule engine (English)        │
-│    └── llm.py   optional fallback parser     │
+│    ├── nlu.py        1. rules (English)      │
+│    ├── llm.py        2. single-shot fallback │
+│    └── agent_loop.py 3. bounded tool loop    │
+│          └── tools.py  the only way to act   │
 ├──────────────────────────────────────────────┤
 │  scheduler.py — 1 Hz thread over SQLite jobs │
 ├──────────────────────────────────────────────┤
@@ -216,7 +263,9 @@ lg-home-agent/
 │   ├── config.py           config load + defaults
 │   ├── db.py               persistence
 │   ├── nlu.py              English intent parser (core)
-│   ├── llm.py              optional LLM layer
+│   ├── llm.py              optional LLM layer: one call, validated JSON
+│   ├── agent_loop.py       tier 3: bounded tool loop
+│   ├── tools.py            tool schemas + ToolBox (validates every argument)
 │   ├── agent.py            orchestration + reply phrasing
 │   ├── scheduler.py        durable task runner
 │   ├── server.py           HTTP server (stdlib)
@@ -227,10 +276,13 @@ lg-home-agent/
 │       ├── app.js          state + rendering
 │       ├── manifest.webmanifest
 │       └── sw.js           service worker
-├── tests/                  62 unit tests, stdlib only
-├── eval/                   reproducible intent-parser benchmark
+├── tests/                  90 unit tests, stdlib only
+│   ├── fake_llm.py         scripted OpenAI-compatible server (offline CI)
+│   └── test_agent_loop.py  tier routing + every loop guardrail
+├── eval/                   reproducible benchmarks
 │   ├── dataset.jsonl       56 labelled utterances, fixed clock
-│   └── run.py              accuracy per category, `--min` for CI
+│   ├── run.py              rule accuracy per category, `--min` for CI
+│   └── tiers.py            which tier answers 15 hard sentences, and what it costs
 ├── tools/
 │   ├── thinq_check.py      ThinQ calibration helper
 │   ├── make_icons.py       renders every icon and splash screen
@@ -297,22 +349,28 @@ transmitted, and replies say so. Set it to `false` once the payload matches.
 
 ## 6. Enabling the LLM (optional)
 
-Works without it. To handle freer phrasing:
+Works without it — with no key, the rules answer alone and anything they miss gets an
+honest "I did not catch that". To handle freer phrasing, add a key:
 
 ```json
 {
   "llm": {
     "enabled": true,
-    "base_url": "https://api.openai.com/v1",
-    "api_key": "sk-...",
-    "model": "gpt-4o-mini"
+    "base_url": "https://open.bigmodel.cn/api/paas/v4",
+    "api_key": "...",
+    "model": "glm-4-flash"
   }
 }
 ```
 
-Any OpenAI-compatible endpoint works — point `base_url` at DeepSeek, Together, or a
-local vLLM server. The header badge changes to "LLM assist" once it is active. Timeouts
-and malformed JSON fall back to the rule engine, so the assistant never stalls.
+Any OpenAI-compatible endpoint works — swap `base_url` and `model` for DeepSeek,
+Together, OpenAI, or a local vLLM server. The endpoint must support **function calling**
+(`tools` / `tool_calls`), because tier 3 is built on it; a provider that ignores the
+`tools` field will still work, but every hard sentence will fall back to a single pass.
+
+One key powers both model tiers. The header badge changes to "LLM assist" once it is
+active. Timeouts and malformed JSON fall back down the cascade, so the assistant never
+stalls — the worst case is the rules answering alone.
 
 ---
 
@@ -345,6 +403,18 @@ and malformed JSON fall back to the rule engine, so the assistant never stalls.
    appliances that are meant to keep running.
 7. **No sensors.** Temperature and humidity come from the simulator; the app shell shows
    them, but nothing reads a real sensor yet.
+8. **The tool loop is slow and not repeatable.** 3–17 s per sentence against
+   `glm-4-flash`, and the same sentence can take different paths on two runs. That is
+   acceptable for a demo and not acceptable for a product; a larger model with a stable
+   temperature, or caching the plan for repeated phrasings, is the obvious next step.
+9. **A confident partial parse cannot escalate.** *"cool the bedroom down and shut the
+   living room off"* is matched as `mode=cool` and the second clause is dropped, because
+   the rule tier returns a complete-looking intent and the loop is never consulted. The
+   fix is coverage tracking — have `nlu.parse` report which spans it consumed and escalate
+   the remainder — not a bigger model.
+10. **The action schema is air-conditioner shaped.** `temperature` is 16–30 °C, so
+    *"the fridge is too warm"* has no valid action and the model does something else
+    instead. Per-device capability schemas would fix it.
 
 ---
 
@@ -369,7 +439,7 @@ and malformed JSON fall back to the rule engine, so the assistant never stalls.
 | Storage | SQLite (stdlib) | durable jobs, zero setup |
 | Scheduling | custom 1 Hz thread | full control over persistence and retry |
 | NLU | hand-written rules | determinism where correctness matters |
-| LLM | OpenAI-compatible API | optional, swappable, never authoritative |
+| LLM | OpenAI-compatible API | optional, swappable; may act only through validated tools |
 | Frontend | vanilla HTML/CSS/JS | no build step, opens instantly |
 | App | PWA (`manifest` + service worker) | installs to the home screen; Capacitor for an APK |
 
@@ -379,20 +449,24 @@ and malformed JSON fall back to the rule engine, so the assistant never stalls.
 
 ### Unit tests
 
-62 tests, standard library only — no pytest, no fixtures, no network:
+90 tests, standard library only — no pytest, no fixtures, no network:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
 ```
-test_nlu.py     device resolution · actions · schedules · queries · compute_next
-test_agent.py   control · multi-device · slot filling · capability checks ·
-                scheduler execution · crash recovery
+test_nlu.py         device resolution · actions · schedules · queries · compute_next
+test_agent.py       control · multi-device · slot filling · capability checks ·
+                    scheduler execution · crash recovery
+test_agent_loop.py  tool loop against a scripted model: hallucinated ids, string
+                    booleans, unreadable times, step budget, tier routing
 ```
 
 The suite uses a temporary database and a temporary simulator state file, so running it
-never touches `data/`.
+never touches `data/`. The loop tests drive `tests/fake_llm.py`, a local HTTP server that
+replays a scripted transcript — which is how a *wrong* model can be tested on demand
+instead of hoped for.
 
 ### Intent benchmark
 
@@ -437,6 +511,61 @@ is listed as such in section 9.
 
 CI also runs the suite on Linux and Windows across Python 3.10–3.13, then starts the
 server and asserts a real request round-trips (`.github/workflows/tests.yml`).
+
+### Cascade benchmark
+
+The rule benchmark above cannot see the tiers behind it. This one can — it replays
+fifteen utterances the rule engine *cannot* parse, against the real model:
+
+```bash
+python -m eval.tiers              # table + summary
+python -m eval.tiers --markdown   # the table below
+python -m eval.tiers --only 3     # just what the loop did
+```
+
+One run, `glm-4-flash`, mock devices. The last column is my reading of the result, not
+the program's:
+
+| utterance | tier | steps | time | what it did | verdict |
+|---|---|---|---|---|---|
+| the bedroom is a sauna, sort it out | 3 loop | 3 | 10.3s | read state, then `power=True, mode=cool, 24°C` | correct |
+| the whole flat is too warm | 3 loop | 4 | 8.5s | both ACs on, 22°C | correct |
+| put the whole flat to sleep | 3 loop | 7 | 15.0s | five devices off | correct |
+| put the living room to sleep in 20 minutes | 3 loop | 3 | 8.1s | `power=False`, scheduled | correct |
+| the air in here is disgusting | 3 loop | 3 | 7.9s | purifier on | correct |
+| get the flat ready for bed | 3 loop | 7 | 17.5s | five devices off | correct |
+| everything off, I'm leaving | 3 loop | 6 | 14.4s | five devices off | correct |
+| the kitchen smells | 3 loop | 3 | 11.7s | purifier on | correct |
+| it feels clammy in the bedroom | 3 loop | 3 | 8.5s | `power=True` — dry mode would be better | partial |
+| wake the house up | 3 loop | 3 | 6.9s | asked which device instead of acting | partial |
+| the fridge is too warm | 3 loop | 3 | 6.4s | `power=True` on a fridge that is already on | wrong |
+| I'm freezing in the bedroom | 1 rules | — | 0.0s | `power=True, mode=heat, 24°C` | correct |
+| cool the bedroom down and shut the living room off | 1 rules | — | 0.0s | `mode=cool` — **dropped the second half** | wrong |
+| keep the bedroom cool every night at 11 pm | 1 rules | — | 0.0s | `mode=cool`, nightly job | correct |
+| the washer has been on for ages | 2 single-shot | — | 3.3s | reported its state | correct |
+
+Eleven of fifteen reach the loop, one reaches tier 2, three are answered by the rules,
+none go unanswered. Average loop latency 10.3 s over 3–7 steps.
+
+**Read this table as a list of problems, not a score.** Three of the four misses are
+informative:
+
+- *"the fridge is too warm"* is not the model's fault: the toolset exposes
+  `temperature` as 16–30 °C, which is an air-conditioner range. A fridge setpoint of
+  3 °C has no representation, so the model did the only thing it could. The schema is
+  the bug.
+- *"wake the house up"* is non-determinism, not a design flaw — an earlier run of the
+  same sentence turned two devices on. A small model at temperature 0.1 is still not
+  a function.
+- *"cool the bedroom down and shut the living room off"* is the rules tier being
+  **confidently half-right**: it matched `cool` and stopped, and because it returned a
+  complete-looking intent, the loop never saw the sentence. A parser that reported
+  which parts of the input it actually consumed could escalate the leftover clause.
+  It does not, and that is the most interesting thing this table exposes.
+
+**Be honest about what this measures.** Fifteen sentences, one model, one run each,
+on a simulator. It is enough to show the tiers are wired the way the design claims and
+to catch regressions in routing; it is not a benchmark of language understanding.
 
 ---
 
