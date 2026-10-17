@@ -329,6 +329,18 @@ class ProseBeforeActingTests(LoopTestBase):
         self.assertEqual(result["reply"], "The purifier is running now.")
         self.assertTrue(self.state("purifier")["power"])
 
+    def test_a_tool_name_pasted_into_prose_is_stripped(self):
+        """Seen end-to-end: the model wrote "finish\\nThe bedroom AC has been…"
+        as prose instead of calling the tool, and the word reached the user."""
+        self.fake.script = [
+            tool_call("control", device_id="purifier",
+                      actions=[{"action": "power", "value": True}]),
+            prose("finish\nThe purifier is running now."),
+        ]
+        result = self.run_loop("the air in here is disgusting")
+
+        self.assertEqual(result["reply"], "The purifier is running now.")
+
 
 class SummaryTests(LoopTestBase):
     """The loop's own words, when the model stops without calling `finish`.

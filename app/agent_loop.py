@@ -22,7 +22,7 @@ import time
 from datetime import datetime
 
 from . import db, llm
-from .tools import TOOL_SCHEMAS, ToolBox
+from .tools import TOOL_SCHEMAS, ToolBox, clean_reply
 
 MAX_STEPS = 8
 DEADLINE_SECONDS = 25.0
@@ -112,7 +112,7 @@ def run(cfg: dict, text: str, adapter, now: datetime,
             calls = msg.get("tool_calls") or []
 
             if not calls:
-                reply = (msg.get("content") or "").strip()
+                reply = clean_reply(msg.get("content") or "")
                 # Prose before any tool call is usually the model narrating its
                 # own confusion, not answering: glm-4-flash has replied to "the
                 # air is disgusting" with "would you like me to…" and to "get

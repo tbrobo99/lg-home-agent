@@ -28,8 +28,14 @@ _TRUE = {"true", "on", "yes", "1"}
 _FALSE = {"false", "off", "no", "0"}
 
 # Small models sometimes echo the tool name into its own argument
-# ("finish\nThe AC is on"). Cheap to clean, ugly to show a user.
+# ("finish\nThe AC is on"), and sometimes into prose instead of calling the
+# tool at all. Cheap to clean, ugly to show a user.
 _ECHOED_NAME = re.compile(r"^(?:finish|ask_user)\b[\s:：\-]*", re.I)
+
+
+def clean_reply(text: str) -> str:
+    """Strip a tool name the model pasted in front of its own sentence."""
+    return _ECHOED_NAME.sub("", (text or "").strip()).strip()
 
 TOOL_SCHEMAS: list[dict] = [
     {
@@ -351,13 +357,12 @@ class ToolBox:
         }
 
     def _t_ask_user(self, question: str = "") -> dict:
-        self.question = _ECHOED_NAME.sub("", (question or "").strip()) \
-            or "Which device do you mean?"
+        self.question = clean_reply(question) or "Which device do you mean?"
         self.finished = True
         return {"ok": True, "asked": self.question}
 
     def _t_finish(self, reply: str = "") -> dict:
-        self.reply = _ECHOED_NAME.sub("", (reply or "").strip()) or None
+        self.reply = clean_reply(reply) or None
         self.finished = True
         return {"ok": True}
 
