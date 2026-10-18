@@ -285,5 +285,85 @@ class PhrasingTest(unittest.TestCase):
         self.assertEqual(txt, "switch the Living Room AC to heating, fan low")
 
 
+class GroupOffTest(AgentTestBase):
+    """A flat action list cannot say "except the fridge", so the exception lives
+    in one table. Without it, "everything off" switched the fridge off while the
+    scene layer spared it — the same sentence meaning two things."""
+
+    def test_everything_off_spares_the_fridge(self):
+        r = self.agent.handle("turn off everything")
+
+        self.assertFalse(self.adapter.get_state("ac_living")["power"])
+        self.assertTrue(self.adapter.get_state("fridge")["power"])
+        self.assertIn("Fridge stays on", r["reply"])
+
+    def test_naming_the_fridge_still_switches_it_off(self):
+        """The exception is about the word "everything", not about the fridge."""
+        self.agent.handle("turn off the fridge")
+        self.assertFalse(self.adapter.get_state("fridge")["power"])
+
+    def test_a_room_group_is_unaffected(self):
+        r = self.agent.handle("turn off everything in the living room")
+        self.assertNotIn("stays on", r["reply"])
+        self.assertFalse(self.adapter.get_state("purifier")["power"])
+
+
+class SmellTest(AgentTestBase):
+    """A smell is an air problem, and the air is the purifier's job.
+
+    The bug this covers was destructive rather than cosmetic: "the kitchen
+    smells" resolved to the fridge, because the fridge is the only device in the
+    kitchen, and the tool loop switched the fridge off to help. Two runs in three.
+    """
+
+    def test_a_smelly_room_turns_on_the_purifier(self):
+        r = self.agent.handle("the kitchen smells")
+
+        self.assertEqual(r["intent_name"], "control")
+        self.assertTrue(self.adapter.get_state("purifier")["power"])
+        self.assertEqual(self.adapter.get_state("purifier")["fan"], "high")
+
+    def test_the_fridge_is_not_the_answer_to_a_smell(self):
+        before = self.adapter.get_state("fridge")["power"]
+        self.agent.handle("the kitchen smells")
+        self.assertEqual(self.adapter.get_state("fridge")["power"], before)
+
+    def test_an_appliance_that_smells_is_not_ours_to_fix(self):
+        """ "The fridge smells" is about the fridge. Turning on a purifier would
+        be answering a question the user did not ask."""
+        r = self.agent.handle("the fridge smells")
+        self.assertNotEqual(r["intent_name"], "control")
+
+    def test_an_explicit_off_still_wins(self):
+        self.adapter.apply("purifier", [{"action": "power", "value": True}])
+        r = self.agent.handle("turn off the purifier, it stinks")
+
+        self.assertEqual(r["intent_name"], "control")
+        self.assertFalse(self.adapter.get_state("purifier")["power"])
+
+
+class ComfortDialogueTest(AgentTestBase):
+    def test_clammy_is_a_humidity_complaint(self):
+        """Dry, not cool. The loop answered this with `mode=auto`, which is not
+        wrong so much as not the point."""
+        r = self.agent.handle("it feels clammy in the bedroom")
+
+        self.assertEqual(r["intent_name"], "control")
+        self.assertEqual(self.adapter.get_state("ac_bedroom")["mode"], "dry")
+
+    def test_stuffy_asks_which_room_and_then_acts(self):
+        """The documented multi-turn flow, and the reason a comfort request is
+        not handed to the loop: only the room is missing, and no tool can read
+        which room someone is standing in."""
+        first = self.agent.handle("it's stuffy in here")
+        self.assertEqual(first["intent_name"], "need_target")
+        self.assertIn("Which room", first["reply"])
+
+        second = self.agent.handle("the bedroom")
+        self.assertEqual(second["intent_name"], "control")
+        self.assertTrue(self.adapter.get_state("ac_bedroom")["power"])
+        self.assertEqual(self.adapter.get_state("ac_bedroom")["mode"], "cool")
+
+
 if __name__ == "__main__":
     unittest.main()

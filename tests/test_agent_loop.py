@@ -190,6 +190,71 @@ class ScheduleTests(LoopTestBase):
                             for m in second if m.get("role") == "tool"))
 
 
+class TimeGuardTests(LoopTestBase):
+    """The other half of the timestamp guardrail.
+
+    `schedule` refuses a model-supplied clock time. This refuses the opposite
+    mistake — acting immediately on a sentence that named a time — which the
+    benchmark caught twice: "put the living room to sleep in 20 minutes" turned
+    the room off on the spot, and on another run said it had been scheduled with
+    an empty job table.
+    """
+
+    TEXT = "shut the living room AC off in 20 minutes"
+
+    def test_acting_now_is_refused(self):
+        self.adapter.apply("ac_living", [{"action": "power", "value": True}])
+        self.fake.script = [
+            tool_call("control", device_id="ac_living",
+                      actions=[{"action": "power", "value": False}]),
+            tool_call("schedule", device_id="ac_living",
+                      actions=[{"action": "power", "value": False}],
+                      when_text="in 20 minutes"),
+            tool_call("finish", reply="Scheduled."),
+        ]
+        result = self.run_loop(self.TEXT)
+
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(self.state("ac_living")["power"],
+                        "the refusal has to happen before the device is touched")
+        jobs = db.list_jobs()
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["rule"]["type"], "once")
+
+    def test_the_refusal_is_visible_to_the_model(self):
+        self.fake.script = [
+            tool_call("control", device_id="ac_living",
+                      actions=[{"action": "power", "value": False}]),
+            tool_call("ask_user", question="When should I do it?"),
+        ]
+        self.run_loop(self.TEXT)
+
+        second = self.fake.requests[1]["messages"]
+        refusal = [m for m in second if m.get("role") == "tool"]
+        self.assertTrue(any("nothing may happen now" in str(m.get("content"))
+                            for m in refusal))
+        self.assertTrue(any("schedule" in str(m.get("content")) for m in refusal),
+                        "a refusal without the way out is just a wall")
+
+    def test_the_parsed_time_is_stated_to_the_model(self):
+        self.fake.script = [tool_call("finish", reply="Okay.")]
+        self.run_loop(self.TEXT)
+
+        system = self.fake.requests[0]["messages"][0]["content"]
+        self.assertIn("THIS REQUEST HAS A TIME", system)
+        self.assertIn("21:20", system)
+
+    def test_the_prompt_uses_the_clock_the_scheduler_uses(self):
+        """It used to call datetime.now() while the caller passed `now` in, so on
+        any clock other than the wall clock the model planned against the wrong
+        hour — and the scheduler then disagreed with it."""
+        self.fake.script = [tool_call("finish", reply="Okay.")]
+        self.run_loop("the bedroom is a sauna")
+
+        system = self.fake.requests[0]["messages"][0]["content"]
+        self.assertIn("2026-10-17 21:00", system)
+
+
 class GuardrailTests(LoopTestBase):
     def test_step_budget_stops_a_loop_that_never_finishes(self):
         self.fake.script = [
@@ -630,15 +695,39 @@ class RoutingTests(LoopTestBase):
                             self.adapter.list_devices(), "Living Room", self.now)
             plan.assert_not_called()
 
-    def test_a_half_parsed_request_reaches_the_loop(self):
-        """"put the living room to sleep in 20 minutes" is `need_action`: the
-        rules found a time but no verb. Asking the user is the last resort."""
-        self.fake.script = [tool_call("finish", reply="Switching it off at 21:20.")]
+    def test_a_comfort_question_is_not_answered_by_the_loop(self):
+        """The rules already know what "stuffy" means — power, cool, 24. Only the
+        room is missing, and no tool can read which room someone is standing in.
+        The loop answered it by switching on the purifier, which is the wrong
+        appliance for a temperature complaint, so this one stays a question."""
+        self.fake.script = [tool_call("finish", reply="Purifier on.")]
+        result = Agent(self.adapter, self.cfg).handle("it's stuffy in here")
+
+        self.assertEqual(result["intent_name"], "need_target")
+        self.assertIn("Which room", result["reply"])
+        self.assertEqual(self.fake.requests, [])
+        self.assertFalse(self.state("purifier")["power"])
+
+    def test_a_routine_with_a_time_is_not_the_loop_s_job(self):
+        """"put the living room to sleep in 20 minutes" used to be `need_action`
+        and then a ten-second loop run that either fired immediately or claimed
+        to have scheduled without a job behind it. It is a routine with a time:
+        both halves are deterministic, so neither a model nor a round trip is
+        involved."""
+        self.fake.script = []
+        self.adapter.apply("ac_living", [{"action": "power", "value": True}])
         result = Agent(self.adapter, self.cfg).handle(
             "put the living room to sleep in 20 minutes")
 
-        self.assertEqual(result["intent_name"], "agent_loop")
-        self.assertIn("tools", self.fake.requests[0])
+        self.assertEqual(result["intent_name"], "scene")
+        self.assertEqual(result["tier"], "scene")
+        self.assertEqual(self.fake.requests, [])
+        jobs = db.list_jobs()
+        self.assertEqual(len(jobs), 2)
+        self.assertTrue(all(j["actions"] == [{"action": "power", "value": False}]
+                            for j in jobs))
+        self.assertTrue(self.state("ac_living")["power"],
+                        "a scheduled routine must not run on the spot")
 
     def test_a_half_parsed_request_still_asks_when_the_loop_gives_up(self):
         """With no model help available the canned question is the honest floor."""

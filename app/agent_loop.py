@@ -21,7 +21,7 @@ import json
 import time
 from datetime import datetime
 
-from . import db, llm
+from . import db, llm, nlu
 from .tools import TOOL_SCHEMAS, ToolBox, clean_reply
 
 MAX_STEPS = 8
@@ -62,7 +62,8 @@ def available(cfg: dict) -> bool:
     return llm.available(cfg)
 
 
-def _system(cfg: dict, devices: list[dict]) -> str:
+def _system(cfg: dict, devices: list[dict], now: datetime,
+            rule: dict | None = None, rule_label: str = "") -> str:
     lines = []
     for d in devices:
         lines.append(
@@ -70,11 +71,22 @@ def _system(cfg: dict, devices: list[dict]) -> str:
             f"room={d.get('room') or 'unknown'} "
             f"online={'yes' if d.get('online', True) else 'no'}"
         )
-    return SYSTEM_PROMPT.format(
-        now=datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)"),
+    prompt = SYSTEM_PROMPT.format(
+        # The scheduler uses `now`; the prompt used to use datetime.now(). On a
+        # fixed clock those disagree, and the model plans against the wrong hour.
+        now=now.strftime("%Y-%m-%d %H:%M:%S (%A)"),
         default_room=cfg.get("agent", {}).get("default_room", "Living Room"),
         devices="\n".join(lines),
     )
+    if rule:
+        # Stated as a fact rather than left to the model's reading of the
+        # sentence: the parser has already decided, and this is the same
+        # division of labour as `schedule` refusing a model-supplied timestamp.
+        nxt = nlu.compute_next(rule, now)
+        when = nxt.strftime("%Y-%m-%d %H:%M") if nxt else "a later time"
+        prompt += (f"\n\nTHIS REQUEST HAS A TIME: {rule_label!r}, already read as "
+                   f"{when}. It happens then. Use `schedule`, never `control`.")
+    return prompt
 
 
 def _parse_args(raw) -> dict:
@@ -98,12 +110,16 @@ def run(cfg: dict, text: str, adapter, now: datetime,
         return {"handled": False}
 
     devices = adapter.list_devices()
-    box = ToolBox(adapter, cfg, now, default_room)
+    # Parsed once, deterministically, before the model is asked anything. The
+    # loop's job is to work out *what* to do; *when* was never its call.
+    rule, rule_label = nlu.build_rule(text, now)
+    box = ToolBox(adapter, cfg, now, default_room, rule=rule, rule_label=rule_label)
     if prior:
         messages: list[dict] = list(prior) + [{"role": "user", "content": text}]
     else:
         messages = [
-            {"role": "system", "content": _system(cfg, devices)},
+            {"role": "system",
+             "content": _system(cfg, devices, now, rule, rule_label)},
             {"role": "user", "content": text},
         ]
     deadline = time.monotonic() + DEADLINE_SECONDS

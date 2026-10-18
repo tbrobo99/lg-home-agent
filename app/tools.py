@@ -155,11 +155,17 @@ TOOL_SCHEMAS: list[dict] = [
 class ToolBox:
     """Executes tool calls and accumulates what the turn actually did."""
 
-    def __init__(self, adapter, cfg: dict, now: datetime, default_room: str = "") -> None:
+    def __init__(self, adapter, cfg: dict, now: datetime, default_room: str = "",
+                 rule: dict | None = None, rule_label: str = "") -> None:
         self.adapter = adapter
         self.cfg = cfg
         self.now = now
         self.default_room = default_room
+        # A time the rule engine already read out of the user's own sentence.
+        # When it is set, acting now is wrong no matter how the model reads the
+        # request — "in 20 minutes" is not "now".
+        self.rule = rule
+        self.rule_label = rule_label
 
         self.actions: list[dict] = []
         self.targets: list[dict] = []
@@ -308,6 +314,17 @@ class ToolBox:
         return out
 
     def _t_control(self, device_id: str = "", actions=None) -> dict:
+        # The second half of the timestamp guardrail. `schedule` refuses a
+        # model-supplied clock time; this refuses the opposite mistake — acting
+        # immediately on a sentence that named a time. Measured: "put the living
+        # room to sleep in 20 minutes" ran the scene on the spot, twice, and the
+        # user was told it had been scheduled.
+        if self.rule:
+            return {"error": f"this request has a time ({self.rule_label!r}), so "
+                             f"nothing may happen now",
+                    "use": "schedule",
+                    "hint": f"call schedule with when_text={self.rule_label!r}"}
+
         d = self._find(device_id)
         if not d:
             return self._unknown_device(device_id)

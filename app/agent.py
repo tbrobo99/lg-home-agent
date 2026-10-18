@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
-from . import agent_loop, db, llm, nlu
+from . import agent_loop, db, llm, nlu, scenes
 from .devices.base import FAN_LABELS, MODE_LABELS, describe_action
 
 # how long a half-finished request stays open
@@ -74,7 +74,6 @@ class Agent:
         # which tier answers is recorded, not inferred: a tier 2 plan carries the
         # same intent names as the rules, so `intent_name` cannot tell them apart
         tier = "rules"
-
         # 0. an answer to a question the tool loop asked last turn
         prior = self._resume_loop(text, devices, default_room, fallback, now)
         if prior is not None:
@@ -106,6 +105,12 @@ class Agent:
                     "partial": intent,
                     "expires": now + timedelta(seconds=PENDING_TTL),
                 }
+
+        if intent["intent"] == "scene":
+            # A routine is a table lookup, not a parse. It answers in the same
+            # tier as the rules, but it is a different thing and the benchmark
+            # should be able to say so.
+            tier = "scene"
 
         result = self._execute(intent, now)
         result["intent_name"] = intent["intent"]
@@ -214,6 +219,15 @@ class Agent:
             if alt and self._complete(alt):
                 alt["clarify"] = alt.get("clarify") or intent.get("clarify")
                 return alt
+
+        # A comfort phrase the rules could only half-answer is the one
+        # `need_*` the loop should not take. The action is already known
+        # ("power on, cool, 24"), only the room is missing — and which room
+        # someone is standing in is not something a tool can read. Asking is one
+        # cheap turn. Handed to the loop, "it's stuffy in here" switched on the
+        # purifier, which is the wrong appliance for a temperature complaint.
+        if kind == "need_target" and intent.get("comfort"):
+            return None
 
         # `need_*` is a half-parsed request: the rules found a target but no
         # action, or an action but no target. Asking the user is the last
@@ -351,6 +365,8 @@ class Agent:
             return self._do_query(it)
         if kind == "control":
             return self._do_control(it)
+        if kind == "scene":
+            return self._do_scene(it, now)
         if kind == "schedule":
             return self._do_schedule(it, now)
         if kind == "cancel":
@@ -374,7 +390,22 @@ class Agent:
         targets = self._targets(it)
         if not targets:
             return {"reply": "I could not find that device.", "ok": False, "actions": []}
-        if len(targets) == 1:
+
+        # "Everything off" is a figure of speech. A flat action list cannot say
+        # "except the fridge", so the exception lives in one table that the scene
+        # layer reads too — otherwise the same sentence means two different
+        # things depending on which branch answered it.
+        kept: list[str] = []
+        if it.get("group") and any(a["action"] == "power" and a["value"] is False
+                                   for a in it["actions"]):
+            keep = [t for t in targets
+                    if (self.adapter.get_device(t["id"]) or {}).get("type")
+                    in scenes.KEEP_RUNNING]
+            if keep and len(keep) < len(targets):
+                kept = [t["name"] for t in keep]
+                targets = [t for t in targets if t not in keep]
+
+        if len(targets) == 1 and not kept:
             return self._do_control_one(it, targets[0])
 
         outcomes = []
@@ -397,6 +428,9 @@ class Agent:
                 lines.append(f"\u00b7 {name} \u2014 {self.action_summary(it['actions'])}")
             else:
                 lines.append(f"\u00b7 {name} \u2014 skipped: {self._strip_name(err, name)}")
+        if kept:
+            names = self._name_list(kept)
+            lines.append(f"{names} {'stays' if len(kept) == 1 else 'stay'} on.")
         if it.get("clarify"):
             lines.append(it["clarify"])
         return {"reply": "\n".join(lines), "ok": ok_count > 0, "actions": it["actions"]}
@@ -446,6 +480,131 @@ class Agent:
         if it.get("clarify"):
             reply += "\n" + it["clarify"]
         return {"reply": reply, "ok": True, "actions": it["actions"]}
+
+    @staticmethod
+    def _name_list(names: list[str]) -> str:
+        """ "A", "A and B", "A, B and C" — an Oxford-free list for one sentence."""
+        if len(names) == 1:
+            return names[0]
+        if len(names) == 2:
+            return f"{names[0]} and {names[1]}"
+        return ", ".join(names[:-1]) + f" and {names[-1]}"
+
+    @staticmethod
+    def _short(device: dict) -> str:
+        """ "Kitchen Fridge" -> "Fridge". The room is already the context."""
+        name = device.get("name") or ""
+        room = device.get("room") or ""
+        if room and name.lower().startswith(room.lower() + " "):
+            return name[len(room) + 1:]
+        return name
+
+    def _do_scene(self, it: dict, now: datetime) -> dict:
+        """Run a named routine: different actions per device, one table lookup.
+
+        Scenes are the reason a whole-home request does not need a model. The
+        plan is `scenes.expand`, the execution is the same adapter call every
+        other branch makes, and the only judgement involved — which devices a
+        routine should skip — is in the table, where it can be read and tested.
+        """
+        spec_label = it.get("scene_label") or scenes.label(it["scene"])
+        targets = self._targets(it)
+
+        plan: list[tuple[dict, list[dict]]] = []
+        skipped: list[dict] = []
+        for t in targets:
+            device = self.adapter.get_device(t["id"])
+            if not device:
+                continue
+            acts = scenes.actions_for(it["scene"], device)
+            if acts:
+                plan.append((device, acts))
+            else:
+                skipped.append(device)
+
+        if not plan:
+            return {"reply": f"{spec_label} has nothing to change here.",
+                    "ok": False, "actions": []}
+
+        rule = it.get("rule")
+        if rule:
+            return self._schedule_scene(it, spec_label, plan, skipped, rule, now)
+
+        done: list[str] = []
+        failed: list[tuple[str, str]] = []
+        actions: list[dict] = []
+        for device, acts in plan:
+            res = self.adapter.apply(device["id"], acts)
+            db.log("scene", f"{it['scene']} {device['name']} {acts} -> {res.get('ok')}")
+            if res.get("ok"):
+                done.append(device["name"])
+                actions.extend({**a, "device_id": device["id"],
+                                "device_name": device["name"]} for a in acts)
+            else:
+                failed.append((device["name"], res.get("error") or "command rejected"))
+
+        verb = "off" if any(a["action"] == "power" and not a["value"] for a in actions) \
+            else "on"
+        # Three or more device names in one sentence stops being a sentence, and
+        # the per-device detail is already in `actions` for the app to render.
+        if len(done) >= 3:
+            reply = f"{spec_label} \u2014 {len(done)} devices {verb}."
+        elif done:
+            reply = f"{spec_label} \u2014 {self._name_list(done)} {verb}."
+        else:
+            reply = f"{spec_label} did not run."
+        if skipped:
+            names = self._name_list([self._short(d) for d in skipped])
+            if verb == "off":
+                reply += f"\n{names} {'stays' if len(skipped) == 1 else 'stay'} on."
+            else:
+                reply += (f"\n{names} {'was' if len(skipped) == 1 else 'were'} "
+                          f"left alone.")
+        if failed:
+            reply += "\n" + "\n".join(
+                f"\u00b7 {n} \u2014 skipped: {self._strip_name(e, n)}" for n, e in failed)
+
+        return {"reply": reply, "ok": bool(done), "actions": actions}
+
+    def _schedule_scene(self, it: dict, spec_label: str,
+                        plan: list[tuple[dict, list[dict]]], skipped: list[dict],
+                        rule: dict, now: datetime) -> dict:
+        """A routine with a time is one job per device — the job table's shape."""
+        nxt = nlu.compute_next(rule, now)
+        if nxt is None:
+            return {"reply": "I could not work out that time. Try another phrasing?",
+                    "ok": False, "actions": []}
+
+        created, actions = [], []
+        for device, acts in plan:
+            created.append(db.add_job(
+                device_id=device["id"], device_name=device["name"],
+                actions=acts, rule=rule,
+                next_run_at=nxt.isoformat(timespec="seconds"),
+                repeat_label=it.get("repeat_label", ""),
+                source_text=it.get("raw_text", ""),
+            ))
+            actions.extend({**a, "device_id": device["id"],
+                            "device_name": device["name"]} for a in acts)
+        db.log("scene.schedule", f"{it['scene']} {created} "
+                                 f"{[d['id'] for d, _ in plan]} {rule}")
+
+        verb = "off" if any(a["action"] == "power" and not a["value"] for a in actions) \
+            else "on"
+        when = nxt.strftime("%b %d, %H:%M")
+        label = it.get("repeat_label") or "one time"
+        if len(plan) >= 3:
+            what = f"{len(plan)} devices {verb}"
+        else:
+            what = f"{self._name_list([self._short(d) for d, _ in plan])} {verb}"
+        reply = (f"Scheduled \u2014 {spec_label}, {label}: {what}.\n"
+                 f"Next run: {when} (job {created[0]})")
+        if skipped:
+            reply += (f"\n{self._name_list([self._short(d) for d in skipped])} "
+                      f"untouched.")
+        return {"reply": reply, "ok": True, "actions": actions, "jobs": created,
+                "job": {"id": created[0],
+                        "next_run_at": nxt.isoformat(timespec="seconds")}}
 
     def _do_schedule(self, it: dict, now: datetime) -> dict:
         targets = self._targets(it)

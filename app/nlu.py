@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
+from . import scenes
+
 # ---------------------------------------------------------------- numbers
 
 WORD_NUM = {
@@ -429,6 +431,12 @@ LIST_RE = re.compile(
 GROUP_RE = re.compile(r"\b(everything|all|both)\b|\bevery\s+device\b", re.I)
 
 COMFORT_PATTERNS = [
+    # Damp before hot: "clammy" is a humidity complaint, and cooling it does not
+    # dry it. Measured — the loop answered "it feels clammy in the bedroom" with
+    # mode=auto, which is not wrong so much as not the point.
+    (re.compile(r"\b(clammy|damp|moist|dank)\b", re.I),
+     [{"action": "power", "value": True},
+      {"action": "mode", "value": "dry"}]),
     (re.compile(r"\b(stuffy|muggy|humid|hot|sweaty|boiling|stifling)\b", re.I),
      [{"action": "power", "value": True},
       {"action": "mode", "value": "cool"},
@@ -448,6 +456,36 @@ def extract_comfort(text: str) -> list[dict]:
         if rx.search(text):
             return [dict(a) for a in acts]
     return []
+
+
+# A smell is not a temperature, and it is not about the appliance in the room
+# the user happened to name. It is an air-quality complaint, and the device that
+# answers it is the purifier.
+#
+# Measured, and the reason this exists: "the kitchen smells" resolved to the
+# fridge — the only device in the kitchen — and the tool loop, with nothing
+# better to do, switched the fridge off. Two runs out of three.
+AIR_RE = re.compile(
+    r"\b(?:smell|smells|smelly|smelt|stink|stinks|stank|stinking|reek|reeks)\b"
+    r"|\b(?:odou?r|disgusting|gross|foul|stale)\b", re.I)
+
+AIR_ACTIONS = [{"action": "power", "value": True},
+               {"action": "fan", "value": "high"}]
+
+
+def extract_air(text: str) -> list[dict]:
+    return [dict(a) for a in AIR_ACTIONS] if AIR_RE.search(text) else []
+
+
+def names_a_device(text: str, devices: list[dict]) -> bool:
+    """Did the user name an appliance, rather than a room or a feeling?
+
+    "the kitchen smells" names a room; "the fridge smells" names an appliance
+    and is therefore about that appliance — nothing here can clean a fridge.
+    """
+    t = (text or "").lower()
+    return any(p.search(t) for d in devices
+               for p in _alias_patterns(d.get("type", "")))
 
 
 def resolve_targets(text: str, devices: list[dict], default_room: str = "",
@@ -537,7 +575,36 @@ def parse(text: str, devices: list[dict], now: datetime | None = None,
         res["confidence"] = 0.9
         return res
 
-    # 2. actions + time decide control vs schedule
+    # 2. a named routine beats the action words inside it. "everything off, I'm
+    # leaving" contains a perfectly good control command, and following it would
+    # switch the fridge off — the routine knows better than the words do.
+    # No default room here on purpose: "wake the house up" names no room, so it
+    # must mean every room rather than the one the user happens to be standing in.
+    scene = scenes.detect(t)
+    if scene:
+        scoped, target_label = resolve_targets(t, devices, "", None)
+        if not scoped:
+            scoped, target_label = list(devices), "everything"
+        res.update(intent="scene", scene=scene, scene_label=scenes.label(scene),
+                   confidence=0.93)
+        set_targets(res, scoped, target_label)
+        rule, label = build_rule(t, now)
+        if rule:
+            res.update(rule=rule, repeat_label=label)
+        return res
+
+    # 3. an air-quality complaint goes to the purifier, not to whatever sits in
+    # the room that was mentioned.
+    if not names_a_device(t, devices):
+        air = extract_air(t)
+        purifiers = [d for d in devices
+                     if d.get("type") == "air_purifier" and d.get("online", True)]
+        if air and purifiers:
+            res.update(intent="control", actions=air, confidence=0.9, comfort=True)
+            set_targets(res, purifiers, "the purifier")
+            return res
+
+    # 4. actions + time decide control vs schedule
     actions = extract_actions(t)
     rule, label = build_rule(t, now)
 
@@ -563,6 +630,7 @@ def parse(text: str, devices: list[dict], now: datetime | None = None,
         res.update(intent="schedule", actions=actions, rule=rule,
                    repeat_label=label, confidence=0.92)
         set_targets(res, targets, target_label)
+        res["group"] = bool(GROUP_RE.search(t))
         return res
 
     if actions:
@@ -570,9 +638,12 @@ def parse(text: str, devices: list[dict], now: datetime | None = None,
             return _ask_for(res, "target", devices, actions=actions)
         res.update(intent="control", actions=actions, confidence=0.88)
         set_targets(res, targets, target_label)
+        # "everything off" is a figure of speech, and the agent needs to know it
+        # was one: a flat list cannot express "except the fridge".
+        res["group"] = bool(GROUP_RE.search(t))
         return res
 
-    # 3. status questions
+    # 5. status questions
     if QUERY_RE.search(t):
         device, ties = match_device(t, devices, default_room, fallback_device)
         res.update(intent="query", confidence=0.85)
@@ -592,7 +663,7 @@ def parse(text: str, devices: list[dict], now: datetime | None = None,
             res["clarify"] = "I could not tell which device you mean."
         return res
 
-    # 4. fallback
+    # 6. fallback
     res["clarify"] = ('I can turn devices on and off, set the temperature, and '
                       'schedule things. Try "set the living room AC to 26 degrees" '
                       'or "turn off the living room AC every night at 11 pm".')
