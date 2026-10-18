@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -363,6 +364,32 @@ class ComfortDialogueTest(AgentTestBase):
         self.assertEqual(second["intent_name"], "control")
         self.assertTrue(self.adapter.get_state("ac_bedroom")["power"])
         self.assertEqual(self.adapter.get_state("ac_bedroom")["mode"], "cool")
+
+
+class Tier2ClarifyTest(AgentTestBase):
+    def test_successful_plan_does_not_carry_the_rule_fallback(self):
+        """`hi, living room Ac 25` missed the rules, so tier 2 answered it.
+
+        The rule layer's clarify on a miss is its help text. Inheriting it
+        printed "Done -- set the Living Room AC to 25C" followed by "I can turn
+        devices on and off..." -- one reply contradicting itself.
+        """
+        cfg = dict(config.DEFAULTS)
+        cfg["llm"] = dict(config.DEFAULTS["llm"], enabled=True, api_key="test-key")
+        cfg["agent"] = {"default_room": "Living Room"}
+        agent = Agent(self.adapter, cfg)
+        plan = {"intent": "control", "device_id": "ac_living",
+                "device_name": "Living Room AC",
+                "targets": [self.adapter.get_device("ac_living")],
+                "actions": [{"action": "temperature", "value": 25}], "rule": None}
+
+        with mock.patch("app.llm.plan", return_value=plan):
+            r = agent.handle("hi, living room Ac 25")
+
+        self.assertEqual(r["tier"], "llm")
+        self.assertTrue(r["ok"])
+        self.assertIn("25", r["reply"])
+        self.assertNotIn("I can turn devices on and off", r["reply"])
 
 
 if __name__ == "__main__":

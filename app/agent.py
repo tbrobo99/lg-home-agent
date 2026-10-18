@@ -217,7 +217,11 @@ class Agent:
                 and not WHOLE_HOME_RE.search(text):
             alt = llm.plan(self.cfg, text, devices, now, default_room)
             if alt and self._complete(alt):
-                alt["clarify"] = alt.get("clarify") or intent.get("clarify")
+                # The rules' clarify here is always their generic help text
+                # ("I can turn devices on and off..."), because this branch is
+                # only reached on a full miss. Carrying it over prints a Done
+                # line followed by a sentence saying the request was not
+                # understood -- the action worked and the reply argues with it.
                 return alt
 
         # A comfort phrase the rules could only half-answer is the one
