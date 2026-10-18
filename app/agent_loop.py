@@ -55,7 +55,12 @@ Rules:
    that fits. Never ask which device is meant — there is no missing device.
 9. Different devices may need different actions in one request: cooling one room
    while switching another off is normal. Do not apply one action to all.
-10. Never reply with your reasoning. Say what you did, or call a tool."""
+10. Never reply with your reasoning. Say what you did, or call a tool.
+11. You know only this house. You cannot see the weather, the news, traffic or
+   the internet. When a question needs something from outside — "is it a good
+   day to do laundry", "will it rain tomorrow" — say plainly that you cannot
+   see it, then answer the part you can ("the washer is free, I can start it").
+   Never guess a forecast, and never answer a different question instead."""
 
 
 def available(cfg: dict) -> bool:

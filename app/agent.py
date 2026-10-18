@@ -204,6 +204,12 @@ class Agent:
 
         kind = intent["intent"]
 
+        # A topic this house has no data for is not a parsing failure, so no
+        # later layer can do better with it. Handing "what's the weather like"
+        # to the loop costs three seconds and invites a forecast-shaped guess.
+        if intent.get("out_of_scope"):
+            return None
+
         # A compound sentence whose clauses want different things has to go to
         # the loop: a single intent cannot carry two action lists, and tier 2's
         # schema is even flatter.

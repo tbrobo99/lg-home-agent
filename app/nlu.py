@@ -473,6 +473,35 @@ AIR_ACTIONS = [{"action": "power", "value": True},
                {"action": "fan", "value": "high"}]
 
 
+# Topics this house cannot answer, whatever the phrasing. The generic fallback
+# ("I can turn devices on and off...") is the wrong reply for them: it reads as
+# "I did not understand", when the sentence was understood perfectly and simply
+# needs data that does not exist here. Saying which data is missing is the
+# honest answer, and it is also the more useful one -- the user learns what to
+# tell the agent instead of what to stop asking.
+#
+# Kept as a table, checked only after every control, schedule and query path has
+# failed, so "turn on the dehumidifier, it's raining" is still a command.
+OUT_OF_SCOPE: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\b(?:weather|forecast|rain(?:s|ing|y)?|snow(?:s|ing|y)?|"
+                r"sunny|cloudy|windy|umbrella|humid outside|"
+                r"(?:hot|cold|warm) (?:outside|out there)|"
+                r"how (?:hot|cold|warm) is it (?:outside|out there)|"
+                r"(?:good|nice|bad|fine|ok|okay|wet|dry)\s+(?:day|weather)\s+"
+                r"(?:to|for))\b", re.I),
+     "I cannot see the weather — the only things I can read are the appliances "
+     "in this house. Tell me what it is doing outside and I can act on it: a "
+     "damp day is a good reason to run the dehumidifier."),
+    (re.compile(r"\b(?:music|song|songs|playlist|podcast|radio|spotify|"
+                r"netflix|youtube|movie)\b", re.I),
+     "I cannot play music or video — I only control the appliances."),
+    (re.compile(r"\b(?:news|headlines?|stock|share price|email|calendar|"
+                r"traffic|flight|order (?:a|some|me)|book (?:a|me))\b", re.I),
+     "That is outside this house — I can only work the appliances. I can start "
+     "the washer, set a timer, or read what a device is doing."),
+]
+
+
 def extract_air(text: str) -> list[dict]:
     return [dict(a) for a in AIR_ACTIONS] if AIR_RE.search(text) else []
 
@@ -663,7 +692,14 @@ def parse(text: str, devices: list[dict], now: datetime | None = None,
             res["clarify"] = "I could not tell which device you mean."
         return res
 
-    # 6. fallback
+    # 6. topics this house has no data for
+    for pattern, reply in OUT_OF_SCOPE:
+        if pattern.search(t):
+            res["clarify"] = reply
+            res["out_of_scope"] = True
+            return res
+
+    # 7. fallback
     res["clarify"] = ('I can turn devices on and off, set the temperature, and '
                       'schedule things. Try "set the living room AC to 26 degrees" '
                       'or "turn off the living room AC every night at 11 pm".')

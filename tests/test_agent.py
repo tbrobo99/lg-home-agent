@@ -392,5 +392,34 @@ class Tier2ClarifyTest(AgentTestBase):
         self.assertNotIn("I can turn devices on and off", r["reply"])
 
 
+class OutOfScopeTest(AgentTestBase):
+    def test_weather_names_the_missing_data(self):
+        """The generic help text reads as "I did not understand". This sentence
+        was understood; the house simply has no thermometer outside."""
+        r = self.agent.handle("what's the weather like tomorrow")
+
+        self.assertEqual(r["tier"], "rules")
+        self.assertIn("weather", r["reply"])
+        self.assertNotIn("I can turn devices on and off", r["reply"])
+
+    def test_music_is_refused_by_name(self):
+        r = self.agent.handle("play some music")
+
+        self.assertIn("music", r["reply"])
+
+    def test_a_command_that_mentions_rain_is_still_a_command(self):
+        """The table is checked last, after every control path, so a passing
+        mention of the weather does not turn an order into a refusal."""
+        r = self.agent.handle("turn on the purifier, it's raining")
+
+        self.assertEqual(r["intent_name"], "control")
+        self.assertTrue(self.adapter.get_state("purifier")["power"])
+
+    def test_loop_is_told_it_cannot_see_outside(self):
+        from app.agent_loop import SYSTEM_PROMPT
+
+        self.assertIn("cannot see the weather", SYSTEM_PROMPT)
+
+
 if __name__ == "__main__":
     unittest.main()
