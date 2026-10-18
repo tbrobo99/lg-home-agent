@@ -54,3 +54,12 @@
 {"category": "negative", "text": "hello there", "intent": "unknown"}
 {"category": "negative", "text": "what's the weather like", "intent": "unknown"}
 {"category": "negative", "text": "play some music", "intent": "unknown"}
+{"category": "scene", "text": "wake the house up", "intent": "scene", "targets": ["ac_bedroom", "ac_living", "fridge", "purifier", "washer"]}
+{"category": "scene", "text": "good night", "intent": "scene", "targets": ["ac_bedroom", "ac_living", "fridge", "purifier", "washer"]}
+{"category": "scene", "text": "put the whole flat to sleep", "intent": "scene", "targets": ["ac_bedroom", "ac_living", "fridge", "purifier", "washer"]}
+{"category": "scene", "text": "I'm leaving", "intent": "scene", "targets": ["ac_bedroom", "ac_living", "fridge", "purifier", "washer"]}
+{"category": "scene", "text": "put the bedroom to sleep", "intent": "scene", "targets": ["ac_bedroom"]}
+{"category": "scene", "text": "put the living room to sleep in 20 minutes", "intent": "scene", "targets": ["ac_living", "purifier"], "rule": {"type": "once", "run_at": "2026-10-17T19:02:00"}}
+{"category": "negative", "text": "turn off everything in the living room", "intent": "control", "targets": ["ac_living", "purifier"]}
+{"category": "comfort", "text": "it feels clammy in the bedroom", "intent": "control", "device": "ac_bedroom", "actions": [["power", true], ["mode", "dry"]]}
+{"category": "comfort", "text": "the kitchen smells", "intent": "control", "device": "purifier", "actions": [["power", true], ["fan", "high"]]}

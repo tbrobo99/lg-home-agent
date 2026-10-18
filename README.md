@@ -64,8 +64,9 @@ Agent  Sorry, I did not catch that.                   ← and refuses to invent
 | **Several devices at once** | `set everything in the living room to 24 degrees` · `turn off all the ACs` |
 | **Dialogue state** | `it's stuffy in here` → `Which room?` → `bedroom` |
 | **Goals, not commands** | `the bedroom is a sauna, sort it out` → reads the room, then cools it |
-| **Whole-home in one breath** | `everything off, I'm leaving` → all five devices |
-| **Looks before it acts** | `the air in here is disgusting` → checks PM2.5, runs the purifier |
+| **Routines** | `wake the house up` · `put the whole flat to sleep` · `I'm leaving` — and the fridge is never switched off |
+| **A routine at a time** | `put the living room to sleep in 20 minutes` → scheduled, not run now |
+| **Looks before it acts** | `the air in here is disgusting` → runs the purifier at high |
 | **Phone app** | installable PWA: room tabs, a per-device control sheet, one-tap quick actions |
 
 It understands times as people actually say them: `10:30 pm`, `at 7 am tomorrow`,
@@ -73,7 +74,7 @@ It understands times as people actually say them: `10:30 pm`, `at 7 am tomorrow`
 
 ---
 
-## 2. Seven design decisions worth defending
+## 2. Eight design decisions worth defending
 
 ### The language model is not the timer
 
@@ -116,22 +117,28 @@ On startup the scheduler reconciles instead of guessing:
 Nothing is replayed. Firing *"turn off the AC"* three hours late is not a fix, it is a
 second bug. The rule is: **never silently skip, never silently catch up.**
 
-### Three tiers, and why the model is not the first one
+### Four layers, and why the model is last
 
 `app/nlu.py` is a rule engine: time expressions, recurrence, device resolution,
 actions. It is deterministic, testable, offline, and costs nothing. Misreading
 `half past ten` turns the AC on at the wrong hour, and that is not a failure mode
 worth handing to a probabilistic model.
 
-But rules only cover what someone thought to write. Behind them sit two model
-tiers, and the decision that matters is not that there are two — it is which
+`app/scenes.py` sits beside it rather than above it. A routine — *"wake the house
+up"* — is a table of per-device-type actions matched by phrase, so it is also
+deterministic and also free. It is a separate file because it answers a different
+kind of question, not because it is a different kind of answer.
+
+Rules and scenes cover what someone thought to write. Behind them sit two model
+layers, and the decision that matters is not that there are two — it is which
 request goes where:
 
-| tier | where | latency | can see | can do |
+| layer | where | latency | can see | can do |
 |---|---|---|---|---|
-| 1 rules | `nlu.py` | ~1 ms | the sentence | one deterministic parse |
-| 2 single-shot | `llm.plan` | ~3 s | sentence + device list | one device, one flat action list |
-| 3 tool loop | `agent_loop.py` | 3–18 s | live state, a device at a time | several devices, re-plan, ask |
+| rules | `nlu.py` | ~1 ms | the sentence | one deterministic parse |
+| scenes | `scenes.py` | ~1 ms | the device list | a routine across devices, a different action per type |
+| single-shot | `llm.plan` | ~3 s | sentence + device list | one device, one flat action list |
+| tool loop | `agent_loop.py` | 3–11 s | live state, a device at a time | several devices, re-plan, ask |
 
 Tier 2 is blind: it never sees a device's state, and its schema holds a single
 device. So the router (`Agent._escalate`) does not ask the model how confident it
@@ -144,10 +151,48 @@ feels. It decides from the request:
   it is a guess wearing a JSON schema.
 - **The home as a whole** — *"everything off"* — never touches tier 2, which
   could only do one room and report success.
+- **A half-parsed comfort phrase** — *"it's stuffy"* — stays a question. The
+  action is already known; only the room is missing, and no tool can read which
+  room someone is standing in. Handed to the loop, it switched on the purifier.
 
 This ordering is the argument. Put tier 2 first unconditionally and it answers
 everything, plausibly, and the loop becomes dead code that still looks installed —
 which is how a lot of "agent" demos turn out to be one prompt with extra steps.
+
+### A routine is a table, not a judgement
+
+The scene layer exists because of two benchmark rows that looked like model
+failures and were really a missing layer:
+
+| utterance | what happened | what it is |
+|---|---|---|
+| *"wake the house up"* | `unknown`; then 11 s of loop, a claim with nothing behind it, then an honest refusal | a routine |
+| *"the kitchen smells"* | the fridge is the only device in the kitchen, so the loop switched the fridge off — two runs in three | a device-type mapping |
+| *"put the living room to sleep in 20 minutes"* | acted immediately, or claimed to have scheduled with an empty job table | a routine with a time |
+
+None of these needed a better model. They needed a place to write down what the
+system already knows: that waking up means the ACs and the purifier, that a smell
+means the purifier and never the fridge, and that a fridge is never switched off
+by anything called "everything".
+
+So `scenes.py` is three tables and a phrase match:
+
+```python
+"morning": {"by_type": {"air_conditioner": [{"action": "power", "value": True}],
+                        "air_purifier":   [{"action": "power", "value": True}]},
+            "default": None}          # washer, fridge: leave them alone
+"night":   {"by_type": {}, "default": [{"action": "power", "value": False}]}
+KEEP_RUNNING = {"refrigerator"}
+```
+
+Expansion is per device *type*, so a second bedroom AC needs no change. The room
+is optional — *"put the bedroom to sleep"* scopes the same table to one room — and
+so is the time, because `build_rule` already reads *"in 20 minutes"* and a
+scheduled routine is one job per device, which is the job table's existing shape.
+
+The measured effect is not subtle: those five sentences went from 7–17 s (or a
+wrong answer, or no answer) to 0.0–0.1 s, identical on both runs. What is left in
+the loop is what the loop is actually for.
 
 ### The loop can be wrong, but it cannot corrupt anything
 
@@ -158,16 +203,21 @@ and each one comes from a failure that actually happened:
 | rule | the failure it prevents |
 |---|---|
 | The model never supplies a timestamp | `schedule` takes the user's own words (*"every night at 11 pm"*) and hands them to `nlu.build_rule`. A model that invents `23:30` has no field to put it in — the call comes back `bad arguments`. |
+| A time in the sentence forbids acting now | The same guardrail from the other side. *"Put the living room to sleep in 20 minutes"* was run on the spot, and on another run reported as scheduled with an empty job table. `control` now returns `{"error": "nothing may happen now", "use": "schedule"}` and names the phrase to pass back. |
 | A bad device id is an observation, not an exception | Asked for the bedroom AC, `glm-4-flash` answered `bedroom_ac`; the real id is `ac_bedroom`. The tool returns the valid ids, the next step reads them and corrects itself. |
 | Errors are values | Every tool returns `{"error": …}` and the loop appends it as a `tool` message. The model sees its own mistake — that is the difference between a loop and a pipeline. |
 | Reporting is not doing | Prose ends the loop only when a tool has reported something, or when the loop asked a question. Otherwise it refuses. |
 
-The fourth one is the guardrail this project earned the hard way. Asked to *wake the house
+The last one is the guardrail this project earned the hard way. Asked to *wake the house
 up*, the loop called `list_devices`, then wrote *"The house has been woken up. The Living
 Room AC, Bedroom AC…"* and stopped — and that sentence became the user's answer, with every
 device still off. Nothing in the code was wrong; the model had simply said so. A false
 success is the one failure a home assistant cannot have, so the loop now treats a claim
 with no tool result behind it as a refusal rather than an answer.
+
+Both halves of the timestamp guardrail say the same thing: **the model decides what,
+never when.** It is the same division of labour as the rules, applied to the one tier
+that is allowed to act.
 
 Two budgets bound the whole thing: 8 steps and 25 seconds. If it runs out with
 nothing done it returns `handled: False`, and the caller keeps its "I did not
@@ -270,6 +320,7 @@ From there, *Add to Home Screen* installs it as a standalone app. See
 ├──────────────────────────────────────────────┤
 │  agent.py    — understand → decide → execute │
 │    ├── nlu.py        1. rules (English)      │
+│    ├── scenes.py     1. routines (a table)   │
 │    ├── llm.py        2. single-shot fallback │
 │    └── agent_loop.py 3. bounded tool loop    │
 │          └── tools.py  the only way to act   │
@@ -298,6 +349,7 @@ lg-home-agent/
 │   ├── config.py           config load + defaults
 │   ├── db.py               persistence
 │   ├── nlu.py              English intent parser (core)
+│   ├── scenes.py           routines: per-type action table
 │   ├── llm.py              optional LLM layer: one call, validated JSON
 │   ├── agent_loop.py       tier 3: bounded tool loop
 │   ├── tools.py            tool schemas + ToolBox (validates every argument)
@@ -311,11 +363,12 @@ lg-home-agent/
 │       ├── app.js          state + rendering
 │       ├── manifest.webmanifest
 │       └── sw.js           service worker
-├── tests/                  106 unit tests, stdlib only
+├── tests/                  135 unit tests, stdlib only
 │   ├── fake_llm.py         scripted OpenAI-compatible server (offline CI)
+│   ├── test_scenes.py      routines, and the fridge that no scene may switch off
 │   └── test_agent_loop.py  tier routing + every loop guardrail
 ├── eval/                   reproducible benchmarks
-│   ├── dataset.jsonl       56 labelled utterances, fixed clock
+│   ├── dataset.jsonl       65 labelled utterances, fixed clock
 │   ├── run.py              rule accuracy per category, `--min` for CI
 │   └── tiers.py            which tier answers 15 hard sentences, and what it costs
 ├── tools/
@@ -433,29 +486,28 @@ stalls — the worst case is the rules answering alone.
 4. **Single user, no auth.** It is a local assistant, not a multi-tenant service.
    `--lan` exposes it to the whole network with no password.
 5. **No voice input yet.** Text in, text out.
-6. **Group commands do not know what should stay on.** *"turn off everything"* also
-   switches off the fridge; the group branch in `_do_control` has no notion of
-   appliances that are meant to keep running.
-7. **No sensors.** Temperature and humidity come from the simulator; the app shell shows
+6. **No sensors.** Temperature and humidity come from the simulator; the app shell shows
    them, but nothing reads a real sensor yet.
-8. **The tool loop is slow, and not fully repeatable.** 5–17 s per sentence against
-   `glm-4-flash`. Sampling is now pinned at temperature 0 and most of the benchmark
-   repeats exactly, but two of fifteen utterances still differ between runs — and the
-   guardrail means a miss can turn into an 11-second wait followed by a canned refusal.
-   A larger model with a longer context, or caching the plan for repeated phrasings, is
-   the obvious next step.
-9. **Time inside a request is sometimes ignored.** *"put the living room to sleep in 20
-   minutes"* switches the devices off immediately instead of scheduling them. The cascade
-   catches the mistake — nothing is silently scheduled at the wrong moment — but the time
-   phrase is dropped somewhere between `nlu` and the loop.
-10. **A fridge setpoint works, but only after modelling it.** `devices/base.py` now carries
-    a per-type range and the refrigerator supports `temperature`; that is the ThinQ shape.
-    No other appliance with a setpoint has been added, and the schema still assumes one
-    action name per device — a fridge that sets fridge and freezer separately needs a
-    dimension, not a range.
+7. **The tool loop is slow.** 4–13 s per sentence against `glm-4-flash`, on the four
+   sentences that still need it. Sampling is pinned at temperature 0 and those four now
+   repeat exactly, run to run; a larger model, or caching the plan for repeated phrasings,
+   is the obvious next step. The four are 3–4 steps each, so the cost is the number of
+   round trips, not the size of the prompt.
+8. **A setpoint with no value in the sentence is still a guess.** *"The fridge is too warm"*
+   gets 1 °C — the coldest value the schema allows, because the user did not say what they
+   wanted. Per-type default targets (*too warm* → 4 °C for a fridge, 22 °C for a room)
+   would turn that into a table lookup, the same fix the scene layer applies to routines.
+9. **The scene table is small.** Three routines, five device types, and a phrase match. It
+   covers the demo and no more; a real product would want user-defined scenes, which is a
+   different (and much larger) feature than a preset table.
+10. **A fridge that sets fridge and freezer separately needs a dimension, not a range.**
+    `devices/base.py` carries a per-type temperature range and the refrigerator supports
+    `temperature`, which is the ThinQ shape — but `temperature` is one scalar, so a
+    two-compartment fridge has no representation yet.
 
-Two earlier limitations are closed and are now tests: a compound sentence is no longer
-half-answered (`_clauses_disagree`), and the loop no longer reports work it did not do.
+Three earlier limitations are closed and are now tests: a compound sentence is no longer
+half-answered (`_clauses_disagree`), the loop no longer reports work it did not do, and
+*"turn off everything"* no longer switches off the fridge (`scenes.KEEP_RUNNING`).
 
 ---
 
@@ -463,7 +515,6 @@ half-answered (`_clauses_disagree`), and the loop no longer reports work it did 
 
 - Voice: wake word (openWakeWord) → ASR (faster-whisper) → TTS (edge-tts), ~2 s round trip
 - Conditional rules: *"only if the room is above 28°C"*, driven by the MQTT state stream
-- Scenes: *"good night"* → multiple devices in one utterance
 - Home Assistant as a unified device layer, to bring non-LG devices in
 - Per-user permissions
 - **Evaluate the parser against a public dialogue-state benchmark**, instead of only the
@@ -490,7 +541,7 @@ half-answered (`_clauses_disagree`), and the loop no longer reports work it did 
 
 ### Unit tests
 
-106 tests, standard library only — no pytest, no fixtures, no network:
+135 tests, standard library only — no pytest, no fixtures, no network:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -499,7 +550,9 @@ python -m unittest discover -s tests -v
 ```
 test_nlu.py         device resolution · actions · schedules · queries · compute_next
 test_agent.py       control · multi-device · slot filling · capability checks ·
-                    scheduler execution · crash recovery
+                    scheduler execution · crash recovery · routines · smells
+test_scenes.py      routines per device type, room scoping, the fridge that no
+                    routine may switch off
 test_agent_loop.py  tool loop against a scripted model: hallucinated ids, string
                     booleans, unreadable times, step budget, tier routing, per-device
                     temperature ranges, compound sentences, false claims
@@ -521,31 +574,32 @@ python -m eval.run --min 1.0       # fail unless everything passes
 ```
 
 ```
-Evaluating 56 utterances against the rule engine
+Evaluating 65 utterances against the rule engine
 (no network, no LLM, fixed clock 2026-10-17 18:42)
 
 category          cases   pass     acc
 --------------------------------------
-comfort               3      3    100%
+comfort               5      5    100%
 daily                 3      3    100%
 group_schedule        1      1    100%
 housekeeping          3      3    100%
 immediate            11     11    100%
 mode_fan              5      5    100%
-negative              3      3    100%
+negative              4      4    100%
 once                  8      8    100%
 query                 6      6    100%
 recurring             7      7    100%
+scene                 6      6    100%
 temperature           6      6    100%
 --------------------------------------
-overall              56     56  100.0%
+overall              65     65  100.0%
 ```
 
 The clock is fixed so the dataset is deterministic — *"at 7 am tomorrow"* resolves the
 same way on every machine, forever. CI runs this with `--min 0.95` after the unit tests
 and fails the build on regression.
 
-**Be honest about what this measures.** The dataset is 56 utterances I wrote myself,
+**Be honest about what this measures.** The dataset is 65 utterances I wrote myself,
 against a rule engine I wrote. It is a regression guard, not evidence of general language
 understanding — it cannot tell you how the system behaves on the sentence nobody thought
 of. A public benchmark would be stronger evidence; that is the honest next step, and it
@@ -566,42 +620,63 @@ python -m eval.tiers --markdown   # the table below
 python -m eval.tiers --only 3     # just what the loop did
 ```
 
-`glm-4-flash`, temperature 0, mock devices; the second run below. The last column is my
-reading of the result, not the program's:
+`glm-4-flash`, temperature 0, mock devices. The last column is my reading of the
+result, not the program's:
 
-| utterance | tier | steps | time | what it did | verdict |
+| utterance | layer | steps | time | what it did | verdict |
 |---|---|---|---|---|---|
-| the bedroom is a sauna, sort it out | 3 loop | 3 | 6.8s | read state, then `power=True, mode=cool, 24°C` | correct |
-| the whole flat is too warm | 3 loop | 4 | 7.5s | both ACs on, 22°C | correct |
-| put the whole flat to sleep | 3 loop | 7 | 13.9s | five devices off | correct |
-| put the living room to sleep in 20 minutes | 3 loop | 3 | 9.7s | four devices off **now**, not in 20 min | wrong |
-| the air in here is disgusting | 3 loop | 2 | 5.8s | purifier `fan=high`, but it was never powered on | partial |
-| wake the house up | 1 rules | — | 11.3s | refused to claim it had done anything | failed honestly |
-| get the flat ready for bed | 3 loop | 6 | 16.5s | each device gets its own action | correct |
-| the fridge is too warm | 3 loop | 3 | 5.0s | fridge set to 4°C | correct |
-| everything off, I'm leaving | 3 loop | 7 | 15.6s | five devices off | correct |
-| it feels clammy in the bedroom | 3 loop | 3 | 9.1s | `power=True, mode=cool` | correct |
+| the bedroom is a sauna, sort it out | 3 loop | 3 | 8.8s | read state, then `power=True, mode=cool, 24°C` | correct |
+| the whole flat is too warm | 3 loop | 4 | 12.6s | both ACs on at 22°C | correct |
+| the fridge is too warm | 3 loop | 3 | 6.3s | fridge set to 1°C | partial |
+| cool the bedroom down and shut the living room off | 3 loop | 4 | 9.2s | cooled one room, switched off the other | correct |
+| put the whole flat to sleep | 1 scene | — | 0.1s | four devices off, fridge spared | correct |
+| put the living room to sleep in 20 minutes | 1 scene | — | 0.0s | two jobs created, nothing ran now | correct |
+| wake the house up | 1 scene | — | 0.0s | three devices on | correct |
+| get the flat ready for bed | 1 scene | — | 0.0s | four devices off, fridge spared | correct |
+| everything off, I'm leaving | 1 scene | — | 0.0s | four devices off, fridge spared | correct |
+| the air in here is disgusting | 1 rules | — | 0.0s | purifier on, fan high | correct |
+| the kitchen smells | 1 rules | — | 0.0s | purifier on, fan high — fridge untouched | correct |
+| it feels clammy in the bedroom | 1 rules | — | 0.0s | `mode=dry` | correct |
 | I'm freezing in the bedroom | 1 rules | — | 0.0s | `power=True, mode=heat, 24°C` | correct |
-| the kitchen smells | 3 loop | 3 | 7.4s | purifier on | correct |
-| the washer has been on for ages | 2 single-shot | — | 3.5s | reported its state | correct |
-| cool the bedroom down and shut the living room off | 3 loop | 4 | 7.2s | cooled one room, switched off the other | correct |
 | keep the bedroom cool every night at 11 pm | 1 rules | — | 0.0s | `mode=cool`, nightly job | correct |
+| the washer has been on for ages | 2 single-shot | — | 1.9s | reported its state | correct |
 
-Eleven of fifteen reach the loop, four are answered by the rules, one by tier 2. Across
-the two runs: 24 correct, 4 partial, 2 failed honestly, and **not one invented result**.
+**14 correct, 1 partial, 0 wrong, 0 unanswered.** Four sentences reach the loop at 9.2 s
+average over 3–4 steps; five are answered by the scene table in under 0.1 s; five by the
+rules; one by tier 2.
 
-The first run differs on two rows — *put the whole flat to sleep* failed honestly there
-instead, and *the fridge is too warm* chose 1°C rather than 4°C. Both are in range.
+The result worth reporting is not the score — it is that **both runs are identical,
+sentence by sentence, including which device got which action.** Two runs ago that was
+not true: *wake the house up* failed honestly on one run and switched two devices on in
+the other, and *put the living room to sleep in 20 minutes* acted immediately on one run
+and lied about a job on the other. Nothing about the model changed. Those sentences
+stopped being the model's job.
+
+**The loop is smaller than it was, and that is the design working.** Eleven of these
+fifteen sentences used to reach it; now four do. The five that left for the scene table
+were 7–17 s each and two of them were failures. The two that left for the rules were
+*"the kitchen smells"* — which the loop answered by switching the fridge off, because
+the fridge is the only device in the kitchen — and *"clammy"*, which it answered with
+`mode=auto`. What is left is what needs live state: a symptom, a whole-flat temperature,
+a compound sentence. If the scene table kept growing, the loop would shrink further, and
+that would be fine too — as long as each sentence is *measured* into the layer below
+rather than waved at it.
+
+**The remaining partial is honest.** *"The fridge is too warm"* has no target value in
+the sentence, so the model picked 1 °C — the coldest setting it is allowed. Directionally
+right, more aggressive than a person would be. A per-type default setpoint (*too warm* →
+4 °C for a fridge, 22 °C for a room) is the same kind of table entry as the scene layer,
+and is listed in section 9.
 
 **The rule that matters more than accuracy:** this loop is not allowed to say it did
 something it did not. Its first version echoed the model's word for the work: asked to
 *wake the house up*, it called `list_devices`, wrote "The house has been woken up. The
 Living Room AC, Bedroom AC…", stopped, and that sentence became the answer — with every
 device still off. A false success is worse than a failure, so prose now ends the loop
-only when a tool actually reported something, or when the loop asked a question. Otherwise
-it returns `handled: False` and the caller keeps its own honest reply.
+only when a tool actually reported something, or when the loop asked a question.
+Otherwise it returns `handled: False` and the caller keeps its own honest reply.
 
-Four bugs in this table are already fixed, each with a test that replays it:
+Five bugs in this table are already fixed, each with a test that replays it:
 
 - ***the fridge is too warm*** — the schema offered `temperature` as 16–30 °C, an air
   conditioner's range. A fridge is correct at 3 °C, so no valid value existed and the
@@ -616,12 +691,16 @@ Four bugs in this table are already fixed, each with a test that replays it:
   thing — stays with the rules, which is what a flat list expresses.
 - ***shut the living room off*** was `unknown`: `OFF_RE` only accepted `shut` next to
   `off`, never `shut <device> off`.
+- ***the kitchen smells*** turned the fridge off, twice in three runs, because the fridge
+  is the only device in the kitchen. A smell is an air-quality complaint, and the device
+  that answers it is the purifier — a mapping, so it belongs in `nlu.AIR_RE`, not in a
+  prompt.
 - ***Reported instead of doing*** — see the rule above.
 
 **Be honest about what this measures.** Fifteen sentences, one small model, a simulator.
-It is enough to show the tiers are wired the way the design claims, and to catch
+It is enough to show the layers are wired the way the design claims, and to catch
 regressions in routing and in the guardrails. It is not a benchmark of language
-understanding — the two misses above are exactly that.
+understanding — the remaining partial is exactly that.
 
 ---
 

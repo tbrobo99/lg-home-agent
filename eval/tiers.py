@@ -50,7 +50,8 @@ SENTENCES = [
 
 # `agent.handle` reports which tier answered, because intent names do not: a
 # tier 2 plan and a rule match both come back as "control".
-TIER = {"rules": "1 rules", "llm": "2 single-shot", "loop": "3 loop"}
+TIER = {"rules": "1 rules", "scene": "1 scene", "llm": "2 single-shot",
+        "loop": "3 loop"}
 
 
 def _actions(actions: list[dict]) -> str:
