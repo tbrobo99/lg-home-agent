@@ -13,6 +13,7 @@ Everything returns the same intent dict, which agent.py executes.
 """
 from __future__ import annotations
 
+import difflib
 import re
 from datetime import datetime, timedelta
 
@@ -515,6 +516,75 @@ def names_a_device(text: str, devices: list[dict]) -> bool:
     t = (text or "").lower()
     return any(p.search(t) for d in devices
                for p in _alias_patterns(d.get("type", "")))
+
+
+# ---------------------------------------------------------------- typo repair
+#
+# Typing on a phone produces "bedrom", "purifire", "evry nite". The rules are
+# regexes, so one wrong letter means no match at all -- and for a device name
+# that is worse than no answer: the parser falls back to the default room and
+# turns the wrong appliance off, in 1 ms, with no sign that anything went wrong.
+#
+# So a second attempt is made on a repaired sentence, and it is only accepted
+# when it is strictly better (see Agent._prefer_repaired). Repair is a nearest
+# word over a closed vocabulary -- the words this house actually uses -- so it
+# cannot invent a device, and it never touches a word that is already valid.
+
+# The typo people make with one hand: "turn of the AC".
+_VERB_OF = re.compile(r"\b(turn|switch|shut|power)\s+of\b", re.I)
+
+# Words the domain itself uses. Deliberately closed: anything outside this list
+# and the device vocabulary is left exactly as the user typed it.
+DOMAIN_WORDS = frozenset("""
+a an the and or but if then please thanks thank
+turn switch shut set start stop open close power put
+on off up down in out to at for with from it its them
+now later today tonight tomorrow morning afternoon evening night
+every each day daily weekday weekend monday tuesday wednesday thursday
+friday saturday sunday once twice
+minute minutes hour hours half quarter past to o clock
+degree degrees celsius fahrenheit
+cool cooling heat heating dry fan auto low mid medium high
+all everything whole house home flat place room rooms
+wake sleep sleeping leave leaving away going come back
+it's that this is are be do does make makes
+""".split())
+
+
+def _vocab(devices: list[dict]) -> set[str]:
+    words = set(DOMAIN_WORDS)
+    for d in devices:
+        for field in ("name", "room", "type"):
+            words.update(re.findall(r"[a-z]+", (d.get(field) or "").lower()))
+    return words
+
+
+def repair(text: str, devices: list[dict], cutoff: float = 0.85) -> str:
+    """Correct near-miss words against this house's vocabulary.
+
+    Returns the text unchanged when nothing is close enough, which is the
+    common case: correct sentences have every word already in the vocabulary.
+    """
+    if not text:
+        return text
+    text = _VERB_OF.sub(r"\1 off", text)
+    vocab = _vocab(devices)
+    cache: dict[str, str] = {}
+
+    def fix(m: re.Match) -> str:
+        word = m.group(0)
+        low = word.lower()
+        if len(low) < 3 or low in vocab:
+            return word
+        if low not in cache:
+            hit = difflib.get_close_matches(low, vocab, n=1, cutoff=cutoff)
+            cache[low] = hit[0] if hit else word
+        return cache[low]
+
+    # Twice: once before the word repair ("turn of"), once after it ("swich of"
+    # becomes "switch of" only in the second pass).
+    out = re.sub(r"[A-Za-z]+", fix, _VERB_OF.sub(r"\1 off", text))
+    return _VERB_OF.sub(r"\1 off", out)
 
 
 def resolve_targets(text: str, devices: list[dict], default_room: str = "",

@@ -34,8 +34,18 @@ _ECHOED_NAME = re.compile(r"^(?:finish|ask_user)\b[\s:：\-]*", re.I)
 
 
 def clean_reply(text: str) -> str:
-    """Strip a tool name the model pasted in front of its own sentence."""
-    return _ECHOED_NAME.sub("", (text or "").strip()).strip()
+    """Strip a tool name the model pasted in front of its own sentence.
+
+    Also unwraps a fully quoted reply. A small model that has been asked for
+    "one short sentence" sometimes returns the sentence in quotes, and a chat
+    bubble showing `"The purifier has been turned off."` reads like the agent
+    is quoting somebody else.
+    """
+    out = _ECHOED_NAME.sub("", (text or "").strip()).strip()
+    pairs = {'"': '"', "'": "'", "\u201c": "\u201d", "\u2018": "\u2019"}
+    while len(out) >= 2 and out[0] in pairs and out[-1] == pairs[out[0]]:
+        out = out[1:-1].strip()
+    return out
 
 TOOL_SCHEMAS: list[dict] = [
     {

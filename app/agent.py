@@ -88,6 +88,8 @@ class Agent:
         # 2. otherwise parse normally
         if intent is None:
             intent = nlu.parse(text, devices, now, default_room, fallback)
+            intent = self._retry_repaired(text, intent, devices, now,
+                                          default_room, fallback)
 
             # Rules first. Whatever they could not finish goes to a model, and
             # which model it goes to is decided before any call is made.
@@ -175,6 +177,39 @@ class Agent:
                              for a in sub.get("actions") or [])
 
         return len({shape(s) for s in subs}) > 1
+
+    @staticmethod
+    def _device_was_named(intent: dict, devices: list[dict], source: str) -> bool:
+        """Was the target actually mentioned, or did the parser pick a default?"""
+        dev = next((d for d in devices if d["id"] == intent.get("device_id")), None)
+        if not dev:
+            return False
+        s = (source or "").lower()
+        room = (dev.get("room") or "").lower()
+        name = (dev.get("name") or "").lower()
+        return bool((room and room in s) or (name and name in s))
+
+    def _retry_repaired(self, text: str, intent: dict, devices: list[dict],
+                        now, default_room: str, fallback) -> dict:
+        """A second parse on a typo-corrected sentence, accepted only if better.
+
+        "set the bedrom ac to 22" matched no room, so the tie between the two
+        air conditioners broke towards the default room and the wrong one was
+        set -- deterministically, in a millisecond, with a confident reply. The
+        repair pass is cheap and closed-vocabulary; the rule for using it is
+        that a device the user named beats a device the parser guessed.
+        """
+        fixed = nlu.repair(text, devices)
+        if fixed == text:
+            return intent
+        alt = nlu.parse(fixed, devices, now, default_room, fallback)
+        if alt["intent"] == "unknown":
+            return intent
+        if intent["intent"] == "unknown":
+            return alt
+        named_alt = self._device_was_named(alt, devices, fixed)
+        named_now = self._device_was_named(intent, devices, text)
+        return alt if (named_alt and not named_now) else intent
 
     def _escalate(self, text: str, intent: dict, devices: list[dict],
                   default_room: str, now: datetime) -> dict | None:

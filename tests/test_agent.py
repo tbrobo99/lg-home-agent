@@ -421,5 +421,34 @@ class OutOfScopeTest(AgentTestBase):
         self.assertIn("cannot see the weather", SYSTEM_PROMPT)
 
 
+class TypoToleranceTest(AgentTestBase):
+    def test_misspelt_room_still_targets_that_room(self):
+        """The dangerous typo: a room the parser cannot match is not a miss, it
+        is a tie between two ACs that breaks towards the default room -- so the
+        wrong appliance gets set, in a millisecond, with a confident reply."""
+        r = self.agent.handle("set the bedrom ac to 22 degres")
+
+        self.assertEqual(r["tier"], "rules")
+        self.assertEqual(self.adapter.get_state("ac_bedroom")["target_temp"], 22)
+        self.assertEqual(self.adapter.get_state("ac_living")["target_temp"], 26)
+
+    def test_turn_of_is_read_as_turn_off(self):
+        self.agent.handle("turn on the purifier")
+        r = self.agent.handle("plese swich of the purifire")
+
+        self.assertEqual(r["tier"], "rules")
+        self.assertFalse(self.adapter.get_state("purifier")["power"])
+
+    def test_correct_sentences_are_left_exactly_as_typed(self):
+        from app import nlu
+
+        devices = self.adapter.list_devices()
+        for sentence in ["turn off the living room ac",
+                         "set the bedroom ac to 22 degrees",
+                         "what is the temperature in the kitchen",
+                         "the room of the house"]:
+            self.assertEqual(nlu.repair(sentence, devices), sentence)
+
+
 if __name__ == "__main__":
     unittest.main()
