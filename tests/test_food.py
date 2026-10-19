@@ -8,16 +8,19 @@ not consulted and why these tests assert on the number in the reply.
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app import config  # noqa: E402
+from app import config, db  # noqa: E402
 from app import food  # noqa: E402
 from app import nlu  # noqa: E402
+from app.agent import Agent  # noqa: E402
 from app.devices import MockAdapter  # noqa: E402
+from app.devices import mock as mock_mod  # noqa: E402
 from app.devices.base import CAPABILITIES  # noqa: E402
 
 DEVICES = [
@@ -74,7 +77,26 @@ class ParseOrderTest(unittest.TestCase):
 
 class ReplyTest(unittest.TestCase):
     def setUp(self):
+        # The agent writes every turn to SQLite, so this needs the same
+        # isolation the other agent tests use. Without it the suite reads and
+        # writes the real data/ directory, which works on a machine that has
+        # already run the app and fails on a fresh one.
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self._orig_data_dir = db.DATA_DIR
+        self._orig_db_path = db.DB_PATH
+        self._orig_state_path = mock_mod.STATE_PATH
+        db.DATA_DIR = self.tmp
+        db.DB_PATH = self.tmp / "test.db"
+        mock_mod.STATE_PATH = self.tmp / "mock_state.json"
+        db.init()
         self.adapter = MockAdapter()
+
+    def tearDown(self):
+        db.DATA_DIR = self._orig_data_dir
+        db.DB_PATH = self._orig_db_path
+        mock_mod.STATE_PATH = self._orig_state_path
+        self._tmp.cleanup()
 
     def fridge(self):
         d = self.adapter.get_device("fridge")
@@ -102,8 +124,9 @@ class ReplyTest(unittest.TestCase):
         self.assertNotIn("°C", reply)
 
     def test_a_typo_still_reaches_the_table(self):
-        from app.agent import Agent
-        agent = Agent(self.adapter, dict(config.DEFAULTS))
+        cfg = dict(config.DEFAULTS)
+        cfg["agent"] = {"default_room": "Living Room"}
+        agent = Agent(self.adapter, cfg)
         result = agent.handle("shud i put the chiken in the fridge")
         self.assertEqual(result.get("intent_name"), "food")
         self.assertIn("chicken", result["reply"].lower())
