@@ -20,12 +20,18 @@ from app import food  # noqa: E402
 from app import nlu  # noqa: E402
 from app.agent import Agent  # noqa: E402
 from app.devices import MockAdapter  # noqa: E402
-from app.devices import mock as mock_mod  # noqa: E402
 from app.devices.base import CAPABILITIES  # noqa: E402
+from app.devices import mock as mock_mod  # noqa: E402
 
+# Built from the table, not from `MockAdapter().list_devices()`: constructing an
+# adapter at import time starts a thread that persists every five seconds, and
+# on the very first import it reads the real data/ directory.
 DEVICES = [
-    {**d, "online": True, "capabilities": CAPABILITIES.get(d["type"], ["power"])}
-    for d in MockAdapter().list_devices()
+    {**d,
+     "online": True,
+     "capabilities": CAPABILITIES.get(d["type"], ["power"]),
+     "type_label": mock_mod.TYPE_LABELS.get(d["type"], d["type"])}
+    for d in mock_mod.DEVICES
 ]
 
 
@@ -93,6 +99,7 @@ class ReplyTest(unittest.TestCase):
         self.adapter = MockAdapter()
 
     def tearDown(self):
+        self.adapter.stop()
         db.DATA_DIR = self._orig_data_dir
         db.DB_PATH = self._orig_db_path
         mock_mod.STATE_PATH = self._orig_state_path

@@ -53,6 +53,13 @@ class LoopTestBase(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.fake.__exit__(None, None, None)
+        # The simulator runs a thread that persists state every five seconds,
+        # and it writes to whatever STATE_PATH is current at that moment. Left
+        # running it clears the next test's fixture before the next setUp can
+        # read it — which is how "the model claimed it woke the house up"
+        # started seeing the bedroom AC already on. The failure was intermittent
+        # because it depends on where the tick lands.
+        self.adapter.stop()
         db.DATA_DIR = self._orig_data_dir
         db.DB_PATH = self._orig_db_path
         mock_mod.STATE_PATH = self._orig_state_path
