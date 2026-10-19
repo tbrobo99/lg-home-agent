@@ -469,7 +469,7 @@ lg-home-conversational-agent/
 │       ├── app.js          state + rendering
 │       ├── manifest.webmanifest
 │       └── sw.js           service worker
-├── tests/                  188 unit tests, stdlib only
+├── tests/                  190 unit tests, stdlib only
 │   ├── fake_llm.py         scripted OpenAI-compatible server (offline CI)
 │   ├── test_scenes.py      routines, and the fridge that no scene may switch off
 │   └── test_agent_loop.py  tier routing + every loop guardrail
@@ -649,7 +649,7 @@ half-answered (`_clauses_disagree`), the loop no longer reports work it did not 
 
 ### Unit tests
 
-188 tests, standard library only — no pytest, no fixtures, no network:
+190 tests, standard library only — no pytest, no fixtures, no network:
 
 ```bash
 python -m unittest discover -s tests -v

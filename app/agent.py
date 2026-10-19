@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
-from . import agent_loop, db, food, llm, nlu, scenes
+from . import agent_loop, build, db, food, llm, nlu, scenes
 from .devices.base import FAN_LABELS, MODE_LABELS, describe_action
 
 # how long a half-finished request stays open
@@ -1065,5 +1065,9 @@ class Agent:
             # say so instead of implying the one that happens to be on screen
             "mode": "agent" if self._agent_mode() else "cascade",
             "awaiting": (self._pending or {}).get("missing"),
+            # Which build produced the replies on screen. Two windows can be
+            # talking to two different processes, and the wording of an answer
+            # is a poor way to tell them apart.
+            "build": build.STAMP,
             "now": datetime.now().isoformat(timespec="seconds"),
         }

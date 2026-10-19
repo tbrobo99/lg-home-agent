@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app import config, db  # noqa: E402
+from app import build, config, db  # noqa: E402
 from app.agent import Agent  # noqa: E402
 from app.devices import MockAdapter  # noqa: E402
 from app.devices import mock as mock_mod  # noqa: E402
@@ -448,6 +448,23 @@ class TypoToleranceTest(AgentTestBase):
                          "what is the temperature in the kitchen",
                          "the room of the house"]:
             self.assertEqual(nlu.repair(sentence, devices), sentence)
+
+
+class BuildStampTest(AgentTestBase):
+    """Which build is answering.
+
+    A page and a server can be different builds — a tab left open, a preview
+    panel that never reloaded, a second process holding the port. The wording of
+    a reply is a poor way to tell them apart, and it cost real time twice.
+    """
+
+    def test_the_snapshot_carries_the_stamp_of_the_code_that_answers(self):
+        stamp = self.agent.snapshot()["build"]
+        self.assertEqual(stamp, build.STAMP)
+        self.assertRegex(stamp, r"^[0-9a-f]{7}$")
+
+    def test_the_stamp_is_stable_for_the_same_source(self):
+        self.assertEqual(build._digest(), build._digest())
 
 
 if __name__ == "__main__":

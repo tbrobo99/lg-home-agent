@@ -126,6 +126,19 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6;
   padding: 3px 8px;
 }
 
+/* The build stamp sits beside the backend chip, quieter than it: it answers
+   "is this the same code I just changed?" and nothing else. */
+.build {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .02em;
+  color: var(--ink-faint);
+  opacity: .7;
+  padding: 3px 0 3px 6px;
+}
+.build:empty { display: none; }
+
 /* ---------- summary ---------- */
 
 .summary {

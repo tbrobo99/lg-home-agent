@@ -489,6 +489,10 @@ async function control(deviceId, actions) {
 function renderAll() {
   if (!snapshot) return;
   $("#backend").textContent = BACKEND_LABEL[snapshot.backend] || snapshot.backend || "";
+  // The stamp of the process that is answering, not of the page. A cached
+  // shell talking to a new server still shows the new stamp, which is the
+  // question that matters: which code wrote these replies.
+  $("#build").textContent = snapshot.build || "";
 
   renderRooms();
   const visible = visibleDevices();
