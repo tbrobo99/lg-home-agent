@@ -1,5 +1,5 @@
 {
-  "name": "lg-home-agent",
+  "name": "lg-home-conversational-agent",
   "version": "0.1.0",
   "private": true,
   "description": "Capacitor wrapper that packages app/web as an Android app",

@@ -17,7 +17,7 @@ wrong host for this — pick something that stays up.
 ### Linux (systemd)
 
 ```ini
-# /etc/systemd/system/lg-home-agent.service
+# /etc/systemd/system/lg-home-conversational-agent.service
 [Unit]
 Description=LG Smart Home Agent
 After=network-online.target
@@ -26,7 +26,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/opt/lg-home-agent
+WorkingDirectory=/opt/lg-home-conversational-agent
 ExecStart=/usr/bin/python3 run.py
 Restart=always
 RestartSec=5
@@ -39,8 +39,8 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now lg-home-agent
-journalctl -u lg-home-agent -f
+sudo systemctl enable --now lg-home-conversational-agent
+journalctl -u lg-home-conversational-agent -f
 ```
 
 `Restart=always` is the important line: it covers crashes, and it means a reboot
@@ -173,10 +173,10 @@ enough for the agent, not enough to also run a database server or a container ru
 opkg update
 opkg install python3 python3-sqlite3
 # copy the repo over, then:
-cd /root/lg-home-agent && python3 run.py --lan --no-browser
+cd /root/lg-home-conversational-agent && python3 run.py --lan --no-browser
 ```
 
-Under `procd` (`/etc/init.d/lg-home-agent`) use `procd_set_param respawn` so the agent
+Under `procd` (`/etc/init.d/lg-home-conversational-agent`) use `procd_set_param respawn` so the agent
 comes back after a crash or a reboot, and keep `data/` on the overlay filesystem —
 `/tmp` is a RAM disk and is wiped on reboot.
 

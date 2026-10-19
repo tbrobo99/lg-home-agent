@@ -1,6 +1,6 @@
-# LG Smart Home Agent
+# LG Smart Home Conversational Agent
 
-![tests](https://github.com/tbrobo99/lg-home-agent/actions/workflows/tests.yml/badge.svg)
+![tests](https://github.com/tbrobo99/lg-home-conversational-agent/actions/workflows/tests.yml/badge.svg)
 
 A conversational agent for a whole-home LG appliance setup. You talk to it in plain
 English, and it both acts immediately and schedules future actions — *"turn off the
@@ -284,8 +284,8 @@ the missing slot. `cancel` / `never mind` clears it explicitly.
 No dependencies. Python 3.10+ and nothing else.
 
 ```bash
-git clone <your-repo-url> lg-home-agent
-cd lg-home-agent
+git clone <your-repo-url> lg-home-conversational-agent
+cd lg-home-conversational-agent
 python run.py
 ```
 
@@ -342,7 +342,7 @@ produces a real install behind HTTPS. See [docs/APP.md](docs/APP.md).
 ### Project structure
 
 ```
-lg-home-agent/
+lg-home-conversational-agent/
 ├── run.py                  entry point
 ├── start.bat               double-click launcher (Windows)
 ├── config.example.json     config template (config.json is git-ignored)
