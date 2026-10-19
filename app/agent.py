@@ -77,6 +77,9 @@ class Agent:
         self._pending: dict | None = None
         # the tool loop asked a question; keep its transcript to resume from
         self._loop_ctx: dict | None = None
+        # where the food guidance comes from is said once. Repeating it after
+        # every ingredient is how a useful sentence turns into a wall of text.
+        self._food_note_shown = False
 
     # ------------------------------------------------ entry point
 
@@ -916,7 +919,10 @@ class Agent:
             device = self.adapter.get_device(targets[0]["id"])
             if device:
                 fridge = {**device, "state": self.adapter.get_state(device["id"])}
-        reply = food.answer(it.get("raw_text", ""), fridge)
+        reply = food.answer(it.get("raw_text", ""), fridge,
+                            note=not self._food_note_shown)
+        if reply:
+            self._food_note_shown = True
         return {"reply": reply, "ok": True, "actions": [], "state": None}
 
     # ------------------------------------------------ phrasing

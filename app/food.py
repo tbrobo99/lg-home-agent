@@ -44,10 +44,14 @@ FOOD_TABLE: list[dict] = [
      "label": "leftovers",
      "fresh": "one to two days",
      "frozen": "a month or more"},
-    {"keys": ["butter", "cheese"],
-     "label": "butter and cheese",
+    {"keys": ["butter"],
+     "label": "butter",
      "fresh": "a few weeks once opened",
-     "frozen": "cheese can be frozen for cooking"},
+     "frozen": "it freezes well"},
+    {"keys": ["cheese"],
+     "label": "cheese",
+     "fresh": "a few weeks once opened, and a hard cheese keeps longer",
+     "frozen": "it can be frozen, but it crumbles when thawed"},
     {"keys": ["vegetable", "vegetables", "veggies", "lettuce", "spinach",
               "carrot", "carrots", "broccoli", "cabbage", "cucumber", "salad",
               "greens", "herb", "herbs", "mushroom", "mushrooms", "onion",
@@ -84,13 +88,24 @@ ADEQUACY_RE = re.compile(
 
 
 def match_food(text: str) -> dict | None:
-    """Return the first entry whose trigger word appears in the sentence."""
+    """Return the entry whose trigger word best matches, longest word first.
+
+    Longest first, because the keys overlap: "ice cream" contains "cream", and
+    taking the first entry that matched in table order answered "ice cream" with
+    the milk rule. The entry also carries the key that matched, because the label
+    is a category and the user typed a food — "apple" is in the table as *most
+    fruit*, and telling somebody who asked about an apple that "most fruit" keep
+    three to seven days is an answer to a question they did not ask.
+    """
     t = (text or "").lower()
+    best, best_len = None, 0
     for entry in FOOD_TABLE:
         for key in entry["keys"]:
+            if len(key) <= best_len:
+                continue
             if re.search(r"\b" + re.escape(key) + r"\b", t):
-                return entry
-    return None
+                best, best_len = {**entry, "matched": key}, len(key)
+    return best
 
 
 def wants_storage(text: str) -> bool:
@@ -122,11 +137,18 @@ def is_food_request(text: str) -> bool:
     """
     if not text:
         return False
-    if match_food(text) is None:
+    entry = match_food(text)
+    if entry is None:
         return False
     if wants_storage(text) or wants_adequacy(text):
         return True
-    words = [w for w in re.findall(r"[A-Za-z']+", text.lower()) if w not in _FILLER]
+    # Count what is left after the food itself. Counting words was enough for
+    # "chicken" and wrong for "ice cream": two words, so the bare-ingredient rule
+    # did not fire, and the phrase fell through to the model, which answered
+    # "I cannot assist with that request."
+    rest = re.sub(r"\b" + re.escape(entry.get("matched") or "") + r"\b", " ",
+                  text.lower())
+    words = [w for w in re.findall(r"[A-Za-z']+", rest) if w not in _FILLER]
     return len(words) <= 1
 
 
@@ -136,24 +158,40 @@ DEGREES_RE = re.compile(r"\b(\d{1,2})\s*(?:°\s*c|°|degrees?(?:\s+celsius)?|"
                         r"celsius)\b", re.I)
 
 
-def _quote(food: dict) -> str:
-    """Both compartments as two labelled phases.
+def _subject(food: dict) -> str:
+    """What to call the thing, given what the user called it.
 
-    Labelled rather than written as one sentence, because the frozen entries are
-    not all durations: "several months" is a span, "not in the shell" is a note,
-    and a single verb cannot carry both without producing "it keeps not in the
-    shell".
+    The label wins when it qualifies the food in a way the word itself does not
+    — "rice" is *cooked rice* in this table, and answering "Rice keeps about a
+    day" would be wrong about a bag of basmati. Everywhere else the matched word
+    wins, because the label is a category: "Most fruit" is an answer to a
+    question nobody asked when the word was "apple", and "Butter and cheese" is
+    a worse answer to "butter" than "Butter" is.
     """
-    return (f'fresh compartment: {food["fresh"]}. freezer: {food["frozen"]}.')
+    label, matched = food["label"], food.get("matched") or food["label"]
+    qualifier = label.split(" ", 1)[0].lower()
+    subject = label if qualifier in ("raw", "cooked") else matched
+    return subject[:1].upper() + subject[1:]
 
 
-def _verb(food: dict) -> str:
-    """keeps / keep — "eggs keep", "raw chicken keeps"."""
-    return "keep" if food["label"].endswith("s") else "keeps"
+def _verb(subject: str) -> str:
+    """keeps / keep — "Raw chicken keeps", "Vegetables keep"."""
+    return "keep" if subject.lower().endswith("s") else "keeps"
 
 
-def answer(text: str, fridge: dict | None) -> str:
-    """Compose the reply: the measured temperature first, then the guidance.
+def _note() -> str:
+    """Where the guidance comes from. Short enough to survive being repeated."""
+    return "(general guidance, not a reading from the fridge)"
+
+
+def answer(text: str, fridge: dict | None, note: bool = True) -> str:
+    """Compose the reply: the measured temperature, the guidance, its source.
+
+    Three short lines rather than a paragraph. Measured on the deployed build,
+    three storage questions in a row produced three identical
+    "Kitchen Fridge is running at 3 °C with a freezer at -18 °C." sentences
+    followed by three identical fourteen-word disclaimers, which is a wall of
+    text with two useful facts in it.
 
     `fridge` is the device record plus its live state, or None when this house
     has no refrigerator to read. The guidance still applies either way; only the
@@ -170,13 +208,14 @@ def answer(text: str, fridge: dict | None) -> str:
         fresh_temp = (fridge.get("state") or {}).get("fridge_temp")
         frozen_temp = (fridge.get("state") or {}).get("freezer_temp")
 
-    parts: list[str] = []
+    lines: list[str] = []
     if name and fresh_temp is not None:
         if frozen_temp is not None:
-            parts.append(f"{name} is running at {fresh_temp} °C with a "
-                         f"freezer at {frozen_temp} °C.")
+            lines.append(f"{name}: {fresh_temp} °C · freezer {frozen_temp} °C")
         else:
-            parts.append(f"{name} is running at {fresh_temp} °C.")
+            lines.append(f"{name}: {fresh_temp} °C")
+
+    subject = _subject(food)
 
     if wants_adequacy(text) and not wants_storage(text):
         # A judgement, not a comparison. If the user named a temperature, judge
@@ -189,26 +228,24 @@ def answer(text: str, fridge: dict | None) -> str:
         if asked is not None and 0 <= asked <= 30:
             judge, source = asked, f"{asked} °C"
         elif fresh_temp is None:
-            parts.append("This house has no refrigerator I can read, so I can "
+            lines.append("This house has no refrigerator I can read, so I can "
                          "only judge the guidance, not your appliance.")
-            parts.append(f"{food['label'].capitalize()} {_verb(food)} "
-                         f"{food['fresh']} in a fresh-food compartment.")
-            return " ".join(parts)
+            lines.append(f"{subject}: {food['fresh']} in a fresh-food compartment.")
+            return "\n".join(lines)
         verdict = ("cold enough for that" if judge is not None and judge <= 4
                    else "warmer than that likes")
-        parts.append(f"{food['label'].capitalize()} {_verb(food)} "
-                     f"{food['fresh']}, so {source} is {verdict}.")
+        lines.append(f"{subject} {_verb(subject)} {food['fresh']}, "
+                     f"so {source} is {verdict}.")
         if asked is not None and fresh_temp is not None and asked != fresh_temp:
-            parts.append(f"Right now the compartment is at {fresh_temp} °C.")
-        parts.append("This is general food-safety guidance, not a figure the "
-                     "appliance reports.")
-        return " ".join(parts)
+            lines.append(f"Right now the compartment is at {fresh_temp} °C.")
+        if note:
+            lines.append(_note())
+        return "\n".join(lines)
 
-    parts.append(f"{food['label'].capitalize()}: {_quote(food)}")
+    lines.append(f"{subject} — fridge: {food['fresh']} · freezer: {food['frozen']}")
     if not name:
-        parts.append("I cannot read a refrigerator here, so this is the "
-                     "general rule rather than your appliance.")
-    else:
-        parts.append("This is general food-safety guidance, not a figure the "
-                     "appliance reports.")
-    return " ".join(parts)
+        lines.append("I cannot read a refrigerator here, so this is the general "
+                     "rule rather than your appliance.")
+    elif note:
+        lines.append(_note())
+    return "\n".join(lines)

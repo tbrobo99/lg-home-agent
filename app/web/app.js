@@ -608,6 +608,11 @@ function switchTab(name) {
   for (const key of ["devices", "jobs", "chat"]) {
     $(`#view-${key}`).hidden = key !== name;
   }
+  // In the URL, so a reload or a home-screen relaunch lands where you were
+  // instead of back on Devices. `replaceState` keeps it out of the back stack.
+  if (history.replaceState && location.hash !== `#${name}`) {
+    history.replaceState(null, "", `#${name}`);
+  }
   if (name === "chat") loadMessages().catch(() => {});
 }
 
@@ -631,6 +636,9 @@ $("#clearJobs").addEventListener("click", () => {
 
 refresh();
 setInterval(refresh, 4000);
+
+const startTab = (location.hash || "").replace("#", "");
+if (["devices", "jobs", "chat"].includes(startTab)) switchTab(startTab);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

@@ -151,6 +151,44 @@ class ReplyTest(unittest.TestCase):
         self.assertEqual(result.get("intent_name"), "food")
         self.assertIn("chicken", result["reply"].lower())
 
+    def test_the_word_the_user_typed_is_the_word_in_the_answer(self):
+        """The label is a category; the user asked about one food.
+
+        Answering "apple" with "Most fruit keep three to seven days" is an
+        answer to a question nobody asked.
+        """
+        reply = food.answer("apple", self.fridge())
+        self.assertIn("Apple —", reply)
+        self.assertNotIn("Most fruit", reply)
+
+    def test_a_qualifier_in_the_label_is_kept(self):
+        """ "Rice" must not be answered as if it were cooked rice."""
+        self.assertIn("Cooked rice —", food.answer("rice", self.fridge()))
+        self.assertIn("Raw chicken —", food.answer("chicken", self.fridge()))
+
+    def test_the_longest_key_wins(self):
+        """ "Ice cream" contains "cream", and cream belongs to milk."""
+        self.assertIn("Ice cream", food.answer("ice cream", self.fridge()))
+        self.assertNotIn("printed date", food.answer("ice cream", self.fridge()))
+
+    def test_the_source_note_is_said_once_not_every_time(self):
+        cfg = dict(config.DEFAULTS)
+        cfg["agent"] = {"default_room": "Living Room"}
+        agent = Agent(self.adapter, cfg)
+
+        first = agent.handle("chicken")["reply"]
+        second = agent.handle("apple")["reply"]
+
+        self.assertIn("general guidance", first)
+        self.assertNotIn("general guidance", second)
+
+    def test_the_answer_is_three_short_lines_not_a_paragraph(self):
+        """Three ingredients in a row used to be three identical paragraphs."""
+        reply = food.answer("fish", self.fridge())
+        lines = reply.split("\n")
+        self.assertEqual(len(lines), 3)
+        self.assertLess(max(len(line) for line in lines), 110)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -39,6 +39,9 @@ everything, including the quick actions and the chips:
 The switch posts to `/api/mode` and takes effect on the next message; `config.json`
 sets which one the app starts in.
 
+The active tab is kept in the URL (`#devices`, `#jobs`, `#chat`), so a reload — or a
+relaunch from the home screen — lands where you left off instead of back on Devices.
+
 Tapping a device card opens a bottom sheet with the target temperature, the mode
 pills and a power button. Tapping the power button on the card itself toggles the
 device without opening the sheet.
