@@ -50,6 +50,19 @@ class MatchTest(unittest.TestCase):
         self.assertIsNotNone(food.match_food("what can I cook with eggs"))
         self.assertFalse(food.is_food_request("what can I cook with eggs"))
 
+    def test_a_bare_ingredient_is_a_storage_question(self):
+        # Typed into the deployed build, "chicken" got the generic help text,
+        # which reads as "I did not understand" when the word was clear.
+        for text in ("chicken", "the chicken", "and chicken?", "what about the milk"):
+            self.assertTrue(food.is_food_request(text), text)
+
+    def test_a_bare_ingredient_with_a_recipe_verb_still_is_not(self):
+        self.assertFalse(food.is_food_request("what can I cook with eggs and tomatoes"))
+
+    def test_a_device_is_not_an_ingredient(self):
+        self.assertFalse(food.is_food_request("fridge"))
+        self.assertFalse(food.is_food_request("turn on the living room AC"))
+
 
 class ParseOrderTest(unittest.TestCase):
     """The comfort rules would heat the fridge, so this has to come first."""

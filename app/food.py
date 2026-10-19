@@ -101,6 +101,12 @@ def wants_adequacy(text: str) -> bool:
     return bool(ADEQUACY_RE.search(text or ""))
 
 
+# Words that can sit around an ingredient without making the sentence about
+# something else: "chicken", "the chicken", "and chicken?".
+_FILLER = frozenset("""a an the some this that it and or for me my about what
+whats how long is are do does can i should put keep store of""".split())
+
+
 def is_food_request(text: str) -> bool:
     """True when the sentence is about storing food rather than about a device.
 
@@ -108,11 +114,20 @@ def is_food_request(text: str) -> bool:
     stays a control command; "can I keep the chicken in the fridge" names food
     and a place, so it never reaches the comfort rules, which would read the
     word "cold" as a request to heat the room.
+
+    A bare ingredient counts as a storage question. Measured on the deployed
+    build: typing "chicken" got the generic help text, which reads as "I did not
+    understand" when the word was perfectly clear and the only thing this house
+    can say about an ingredient is how long it keeps.
     """
     if not text:
         return False
-    return match_food(text) is not None and (
-        wants_storage(text) or wants_adequacy(text))
+    if match_food(text) is None:
+        return False
+    if wants_storage(text) or wants_adequacy(text):
+        return True
+    words = [w for w in re.findall(r"[A-Za-z']+", text.lower()) if w not in _FILLER]
+    return len(words) <= 1
 
 
 # "what temperature is that" asked with a number in it, e.g. "is 4 degrees
