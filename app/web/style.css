@@ -75,10 +75,18 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6;
 
 .rooms {
   display: flex;
-  gap: 20px;
+  /* Five rooms plus "All" do not fit a 390px phone at 20px, and the last tab
+     ends up half visible — which reads as a broken layout rather than as
+     something to scroll. 13px fits them, and the row still scrolls if a house
+     ever has more rooms. */
+  gap: 13px;
   overflow-x: auto;
   scrollbar-width: none;
   flex: 1;
+  /* A flex item's min-width is auto, so this row keeps its full content width
+     and pushes the page wider than the viewport; .phone then clips the right
+     edge instead of scrolling it. */
+  min-width: 0;
   padding-bottom: 2px;
 }
 .rooms::-webkit-scrollbar { display: none; }
@@ -122,7 +130,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6;
 
 .summary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 9px;
   padding: 4px 16px 16px;
   flex: 0 0 auto;
@@ -158,7 +166,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6;
 
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 11px;
 }
 
@@ -236,7 +244,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6;
 
 .scenes {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 9px;
 }
 
@@ -462,7 +470,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6;
 .tabbar {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   padding: 7px 0 max(8px, env(safe-area-inset-bottom));
   background: rgba(6, 16, 26, .55);
   backdrop-filter: blur(14px);

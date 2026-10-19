@@ -509,10 +509,8 @@ OUT_OF_SCOPE: list[tuple[re.Pattern, str]] = [
                 r"(?:a|some|dinner|lunch|breakfast)|ingredient|ingredients|"
                 r"what (?:can|should) i (?:make|cook)|seasoning|marinade)\b",
                 re.I),
-     "I do not suggest recipes — a recipe would be invented, and nothing in it "
-     "would come from this house. What I can tell you is how long an ingredient "
-     "keeps and what the refrigerator is actually running at: try \"how long "
-     "can I keep the chicken\" or \"is the fridge cold enough for vegetables\"."),
+     "No recipes — I would be inventing them. Ask me how long something keeps "
+     "and what the fridge is running at: \"how long can I keep the chicken\"."),
 ]
 
 
