@@ -6,8 +6,11 @@ A conversational agent for a whole-home LG appliance setup. You talk to it in pl
 English, and it both acts immediately and schedules future actions — *"turn off the
 living room AC every night at 11 pm"* becomes a durable task that actually fires.
 
-It ships as a phone app: an installable PWA you can add to the home screen, and the
-same files package into an Android APK with Capacitor. No framework, no build step.
+It runs in a phone browser with no framework and no build step. Over HTTPS the page
+can be added to the home screen and behaves like an app; over plain HTTP on the local
+network it cannot, because a service worker needs a secure context. A Capacitor
+project is configured under `android/` for anyone who wants to build an APK, but
+none has been built here — that needs an Android SDK.
 
 It answers in three tiers — deterministic rules for what they cover, a single model call
 for the rest, and a bounded tool loop for requests that need to look at the house before
@@ -67,7 +70,7 @@ Agent  Sorry, I did not catch that.                   ← and refuses to invent
 | **Routines** | `wake the house up` · `put the whole flat to sleep` · `I'm leaving` — and the fridge is never switched off |
 | **A routine at a time** | `put the living room to sleep in 20 minutes` → scheduled, not run now |
 | **Looks before it acts** | `the air in here is disgusting` → runs the purifier at high |
-| **Phone app** | installable PWA: room tabs, a per-device control sheet, one-tap quick actions |
+| **Phone interface** | room tabs, a per-device control sheet, one-tap quick actions; adds to the home screen over HTTPS |
 
 It understands times as people actually say them: `10:30 pm`, `at 7 am tomorrow`,
 `half past ten`, `quarter to eight in the evening`, `in half an hour`.
@@ -300,8 +303,9 @@ python run.py --lan
 ```
 
 It prints the address to open on the phone, e.g. `Phone: http://192.168.1.23:8848`.
-From there, *Add to Home Screen* installs it as a standalone app. See
-[docs/APP.md](docs/APP.md) for the PWA install and the Capacitor APK build.
+That page works in the browser, but it cannot be installed from a plain `http://`
+address: a service worker needs a secure context, so *Add to Home Screen* only
+produces a real install behind HTTPS. See [docs/APP.md](docs/APP.md).
 
 `config.json` is created on first run. To see the available options up front, copy
 `config.example.json` and edit it — the file is git-ignored because it holds your PAT.
@@ -375,7 +379,7 @@ lg-home-agent/
 │   ├── thinq_check.py      ThinQ calibration helper
 │   ├── make_icons.py       renders every icon and splash screen
 │   └── icon-*.html         icon sources
-├── android/                Capacitor project (npm run sync, then build an APK)
+├── android/                Capacitor project (npm run sync; the APK build needs an Android SDK)
 ├── capacitor.config.json   app id, name, and the host the WebView loads
 ├── docs/
 │   ├── APP.md              PWA install, Capacitor APK build
@@ -533,7 +537,7 @@ half-answered (`_clauses_disagree`), the loop no longer reports work it did not 
 | NLU | hand-written rules | determinism where correctness matters |
 | LLM | OpenAI-compatible API | optional, swappable; may act only through validated tools |
 | Frontend | vanilla HTML/CSS/JS | no build step, opens instantly |
-| App | PWA (`manifest` + service worker) | installs to the home screen; Capacitor for an APK |
+| App | PWA (`manifest` + service worker) | installs to the home screen over HTTPS; a Capacitor project is configured, no APK built |
 
 ---
 
@@ -714,8 +718,9 @@ Redmi AC2100).
 A scheduled task only fires if the process is alive. `Restart=always` plus a persistent
 `data/` directory is the whole story.
 
-The phone app is the same server: `python run.py --lan`, then add the page to the home
-screen. Packaging it as an APK is covered in [docs/APP.md](docs/APP.md).
+The phone interface is the same server: `python run.py --lan`, then open the address in
+the phone's browser. Installing it over HTTPS, and the Capacitor build, are covered in
+[docs/APP.md](docs/APP.md) — the APK has not been built on this machine.
 
 For recording a demo, see [docs/DEMO.md](docs/DEMO.md).
 
