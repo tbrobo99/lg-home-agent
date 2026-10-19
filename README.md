@@ -747,8 +747,8 @@ The difference is what each project treats as the hard problem:
 | Intent | IC-DST, retrieval-augmented, LLM-driven | rules first, LLM only for the long tail |
 | Scheduling | none | durable jobs in SQLite, 1 Hz thread |
 | Process restart | dialogue state is in the session | state on disk, missed runs reported |
-| Evaluation | dialogue-state accuracy on their setting | 56-case fixed-clock dataset in CI, 100% |
-| Device layer | simulated | simulator + LG ThinQ Open API adapter |
+| Evaluation | none reported in their write-up | 65-case fixed-clock dataset in CI, 100% |
+| Device layer | simulated | simulator; a ThinQ Open API adapter is written but untested |
 
 Read the table as a division of labour, not a scoreboard. IC-DST answers a question this
 project answers with regexes and accepts the cost: an LLM call on every turn, no offline
@@ -759,7 +759,16 @@ the question this project is built around.
 
 Where ALIVE is ahead, plainly: intent coverage on unusual phrasing, and a per-device
 conversation model that scales better than one global thread as the device count grows.
-Both are on the roadmap above.
+The first is on the roadmap above. The second is not — splitting one conversation per
+appliance would be a redesign of how turns are stored, not an increment.
+
+Two notes on the table above, because both are easy to get wrong. ALIVE's write-up
+reports no accuracy, latency or test figures at all — the 38-page document discusses
+the *quality of its generated dataset*, which is a different thing, so "not reported"
+is a fact about their document rather than a claim about their system. And IC-DST
+itself is not theirs: it is Hudeček and Dušek, *In-Context Learning for Dialogue
+State Tracking*, ACL 2023. Cite that paper, not a coursework project, when the
+question is the method.
 
 ---
 
