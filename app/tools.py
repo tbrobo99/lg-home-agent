@@ -194,6 +194,10 @@ class ToolBox:
         # is the difference between a workflow and an agent that has a fast path.
         self.adopt = adopt
         self.adopted = False
+        # The offer the model was shown, kept so the trace can say what it
+        # turned down. A trace that only lists the calls a model made cannot
+        # distinguish "considered and chose otherwise" from "never told".
+        self.offer: dict | None = None
         # What the turn did, step by step, so the interface can show the work
         # instead of asserting that work happened.
         self.trace: list[dict] = []

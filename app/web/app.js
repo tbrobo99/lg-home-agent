@@ -270,15 +270,19 @@ function addMsg(role, text, meta) {
     const det = document.createElement("details");
     det.className = "trace";
     const sum = document.createElement("summary");
-    const n = meta.trace.length;
+    // The offer is a decision point, not a tool call — count it out of the
+    // steps so "3 steps" means three things the agent actually did.
+    const calls = meta.trace.filter((s) => s.tool !== "offer").length;
+    const unit = calls === 1 ? "step" : "steps";
     sum.textContent = meta.adopted
-      ? `${n} step · took the rules' reading`
-      : `${n} steps · planned it`;
+      ? `took the rules' reading · ${calls} ${unit}`
+      : `declined the reading · ${calls} ${unit}`;
     det.appendChild(sum);
     const ol = document.createElement("ol");
     meta.trace.forEach((s) => {
       const li = document.createElement("li");
       li.textContent = s.result || s.tool;
+      if (s.tool === "offer") li.className = "offer";
       ol.appendChild(li);
     });
     det.appendChild(ol);

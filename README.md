@@ -172,30 +172,52 @@ it.
 
 Set `"mode": "agent"` under `agent:` in `config.json` and that relationship
 inverts for the requests the rules *did* parse. The reading is not applied; it
-is handed to the loop as an offer:
+is handed to the loop as an offer. Two wordings, because a parse knows how much
+of the sentence it actually accounts for:
+
+```
+RULE ENGINE'S READING OF THIS MESSAGE — a plan, not an order:
+  intent: control
+  would do: turn off — Living Room AC
+
+The parser is confident here: it matched a phrase it knows, and the sentence
+has one reading. Adopt it with `adopt_parse` unless it is impossible — the
+appliance is offline, it cannot do that action, or the sentence plainly named a
+different appliance. Those are things only you can see.
+```
 
 ```
 RULE ENGINE'S READING OF THIS MESSAGE — a suggestion, not an instruction:
   intent: control
-  would do: turn off — Living Room AC
+  would do: turn off, switch to cooling — Living Room AC, Bedroom AC
 
-If that reading is right, call `adopt_parse` once and stop; it carries it out.
-If it is wrong, incomplete, or the request needs something it does not cover,
-ignore it and plan with the tools. You are not obliged to agree with it, and
-saying nothing when you disagree is not acceptable — ask, or act.
+The parser is not confident: this sentence has more than one reading, or this
+reading covers only part of it. Check it against the house before accepting it,
+and plan with the tools if it is incomplete. You are not obliged to agree with
+it, and saying nothing when you disagree is not acceptable — ask, or act.
 ```
+
+The split is not decoration. With one permissive wording for both, the model
+overrode a *complete* plan with a worse appliance — *"the kitchen smells"* is
+the purifier in the routine table, and the model switched on the living room AC
+instead, three runs out of three — while needing to override a *half* plan to
+get *"cool the bedroom down and shut the living room off"* right. Confidence is
+the one thing the model cannot recover from the sentence: both look equally
+certain. So the parser states it, and the wording follows.
 
 Measured on this build, against `glm-4-flash`:
 
 | utterance | what the model did |
 |---|---|
-| *"turn off the living room AC"* | declined the offer, called `control` itself — same device, 1 step |
-| *"the bedroom is a sauna"* | `get_state`, then cool 24 °C — 3 steps |
-| *"cool the bedroom down and shut the living room off"* | two `control` calls in one turn, a different action per room |
+| *"turn off the living room AC"* | took the plan — 1 step, 1.0 s |
+| *"the kitchen smells"* | checked the fridge, then took the plan — purifier on |
+| *"the bedroom is a sauna"* | no reading offered, so it read the state and acted — 3 steps |
+| *"cool the bedroom down and shut the living room off"* | overrode the half-plan, sent a bad `mode`, read the error, fixed it |
 
 That last row is the one worth noticing. In the cascade it needed
 `_clauses_disagree`, a hand-written test for "two clauses that want different
-things". In agent mode it is just what a loop does.
+things". In agent mode it is what a loop does — including recovering from its
+own malformed call, which is the only thing in the system that can.
 
 The boundary is which requests contain a *decision about the house* — control,
 schedule, query, and anything the rules failed to parse (`AGENT_INTENTS` in
@@ -205,7 +227,13 @@ question ran a full loop, gave up, and was answered by the rules anyway — 8.8 
 on top of a 15 ms answer. Out-of-scope refusals are excluded for the mirror
 reason: they are not a judgement about this house to revise, they are a
 statement about what this house can see, and a model let near a weather
-question invents a forecast.
+question invents a forecast. A comfort phrase missing only the room is excluded
+too — which room someone is standing in is not something a tool can read.
+
+When the rules have no reading at all, there is no offer and `adopt_parse` is
+not in the tool list. A tool that can only answer *"there is nothing to adopt"*
+is a trap: the model reaches for it, gets nothing back, and the turn falls
+through to the generic help text.
 
 Every guardrail still holds. The loop still acts only through `ToolBox`, is
 still refused a model-supplied timestamp, and still cannot claim work it did
@@ -215,22 +243,25 @@ cascade it sits in front of.
 
 Both modes are switchable at runtime (`POST /api/mode`, or the toggle at the
 top of the Assistant tab), and a reply in agent mode carries the steps behind
-it rather than asserting that steps happened:
+it rather than asserting that steps happened. A declined offer is the first
+line, because that is when the decision was made:
 
 ```json
-"trace": [{"tool": "get_state", "result": "read Bedroom AC — off"},
-          {"tool": "control",   "result": "Bedroom AC — turn on, switch to cooling, set to 24°C"}]
+"trace": [{"tool": "offer",   "result": "the rules' reading: turn on, fan high — Living Room Purifier"},
+          {"tool": "control", "result": "Living Room AC — turn on, fan high"}]
 ```
 
 Run both over the same 15 sentences:
 
 ```bash
-python -m eval.tiers           # cascade:     30.5 s, 4 sentences through a model
-python -m eval.tiers --agent   # agent mode:  83.6 s, 9 sentences through a model
+python -m eval.tiers           # cascade:    30.5 s,  5 sentences through a model
+python -m eval.tiers --agent   # agent mode: 85.7 s, 10 sentences through a model
 ```
 
-That is the trade, stated as a number: agency costs 2.7× the wall clock, and
-buys a model that can read a room before it changes it.
+2.8× the wall clock, and no sentence left to the fallback: in agent mode all
+fifteen are handled by the layer that answered them, where the cascade hands
+ten of them to the rules in a millisecond. That is the trade, stated as a
+number rather than an opinion.
 
 ### A routine is a table, not a judgement
 

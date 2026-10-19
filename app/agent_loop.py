@@ -71,16 +71,27 @@ Rules:
    see it, then answer the part you can ("the washer is free, I can start it").
    Never guess a forecast, and never answer a different question instead."""
 
-OFFER_BLOCK = """
+OFFER_SURE = """
+
+RULE ENGINE'S READING OF THIS MESSAGE — a plan, not an order:
+  intent: {intent}
+  would do: {would}
+
+The parser is confident here: it matched a phrase it knows, and the sentence
+has one reading. Adopt it with `adopt_parse` unless it is impossible — the
+appliance is offline, it cannot do that action, or the sentence plainly named a
+different appliance. Those are things only you can see."""
+
+OFFER_PARTIAL = """
 
 RULE ENGINE'S READING OF THIS MESSAGE — a suggestion, not an instruction:
   intent: {intent}
   would do: {would}
 
-If that reading is right, call `adopt_parse` once and stop; it carries it out.
-If it is wrong, incomplete, or the request needs something it does not cover,
-ignore it and plan with the tools. You are not obliged to agree with it, and
-saying nothing when you disagree is not acceptable — ask, or act."""
+The parser is not confident: this sentence has more than one reading, or this
+reading covers only part of it. Check it against the house before accepting it,
+and plan with the tools if it is incomplete. You are not obliged to agree with
+it, and saying nothing when you disagree is not acceptable — ask, or act."""
 
 
 def available(cfg: dict) -> bool:
@@ -105,8 +116,16 @@ def _system(cfg: dict, devices: list[dict], now: datetime,
         devices="\n".join(lines),
     )
     if offer:
-        prompt += OFFER_BLOCK.format(intent=offer.get("intent", "?"),
-                                     would=offer.get("would", "?"))
+        # How much the parser trusts itself is information only the caller has,
+        # and a model cannot infer it from the sentence — "the kitchen smells"
+        # and "cool the bedroom down and shut the living room off" look equally
+        # certain, and one of them is a complete plan while the other is half of
+        # one. Measured: given the same permissive wording for both, the model
+        # overrode the complete plan with a worse appliance in three runs out of
+        # three, and had to override the half-plan to get it right.
+        block = OFFER_SURE if offer.get("sure") else OFFER_PARTIAL
+        prompt += block.format(intent=offer.get("intent", "?"),
+                               would=offer.get("would", "?"))
     if rule:
         # Stated as a fact rather than left to the model's reading of the
         # sentence: the parser has already decided, and this is the same
@@ -149,6 +168,7 @@ def run(cfg: dict, text: str, adapter, now: datetime,
     rule, rule_label = nlu.build_rule(text, now)
     box = ToolBox(adapter, cfg, now, default_room, rule=rule, rule_label=rule_label,
                   adopt=adopt)
+    box.offer = offer
     if prior:
         messages: list[dict] = list(prior) + [{"role": "user", "content": text}]
     else:
@@ -161,12 +181,20 @@ def run(cfg: dict, text: str, adapter, now: datetime,
     steps = 0
     nudged = False
 
+    # `adopt_parse` is only a real option when there is something to adopt. A
+    # tool that answers "there is no parser reading for this turn" is a trap: a
+    # model that reaches for it has understood the sentence and gets nothing
+    # back, and "the bedroom is a sauna" then fell all the way through to the
+    # rules' generic help.
+    tools = TOOL_SCHEMAS if adopt else [
+        t for t in TOOL_SCHEMAS if t["function"]["name"] != "adopt_parse"]
+
     try:
         while steps < MAX_STEPS and time.monotonic() < deadline:
             steps += 1
             # temperature 0: the same sentence reached the loop twice and took
             # different paths, and a demo does not survive that.
-            msg = llm.chat(cfg, messages, tools=TOOL_SCHEMAS, temperature=0,
+            msg = llm.chat(cfg, messages, tools=tools, temperature=0,
                            max_tokens=800)
             calls = msg.get("tool_calls") or []
 
@@ -180,11 +208,26 @@ def run(cfg: dict, text: str, adapter, now: datetime,
                 if reply and not nudged and not box.targets and not box.question:
                     nudged = True
                     messages.append({"role": "assistant", "content": reply})
+                    # In agent mode the nudge names the offer and forbids prose.
+                    # Measured without either, "the kitchen smells" and "keep
+                    # the bedroom cool every night at 11 pm" both produced a
+                    # sentence instead of an action, were nudged, and produced
+                    # *another* sentence — the second one literally explaining
+                    # that the rule engine's reading was correct instead of
+                    # accepting it, then falling back to the rules six seconds
+                    # later. A model that talks about the reading has understood
+                    # the sentence and still not done anything, so the nudge has
+                    # to remove the option of replying in prose.
+                    hint = ""
+                    if box.offer:
+                        hint = (f"The rule engine's reading is: {box.offer.get('would', '')}. "
+                                "Call `adopt_parse` to accept it, or call `control` / "
+                                "`schedule` to do it differently. ")
                     messages.append({"role": "user", "content":
-                                     "Nothing has been changed yet. If the user "
-                                     "asked for something to happen, call a tool "
-                                     "now. If they only asked a question, answer "
-                                     "it and call finish."})
+                                     "Nothing has been changed yet. Your last message described "
+                                     "the work; that is not the work. " + hint +
+                                     "Reply with a tool call only — no explanation. If the user "
+                                     "only asked a question, call `finish` with the answer."})
                     continue
                 if not reply:
                     break
@@ -235,6 +278,13 @@ def run(cfg: dict, text: str, adapter, now: datetime,
 
 def _result(box: ToolBox, reply: str, steps: int, messages: list[dict],
             awaiting: bool = False) -> dict:
+    trace = list(box.trace)
+    # A declined offer is a decision, and the only place it can be recorded is
+    # here: the model said nothing about it, it simply did something else. Put
+    # it first, because that is when it happened.
+    if box.offer and trace and not box.adopted:
+        trace.insert(0, {"tool": "offer", "args": {},
+                         "result": f"the rules' reading: {box.offer.get('would', '')}"})
     return {
         "handled": True,
         "reply": reply,
@@ -246,6 +296,6 @@ def _result(box: ToolBox, reply: str, steps: int, messages: list[dict],
         "messages": messages if awaiting else None,
         # What the model decided to do, step by step. Recorded so the interface
         # can show the work rather than assert that work happened.
-        "trace": box.trace,
+        "trace": trace,
         "adopted": box.adopted,
     }

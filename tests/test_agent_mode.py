@@ -98,13 +98,42 @@ class OfferTests(AgentModeTestBase):
         self.assertIn("Living Room AC", prompt)
         self.assertIn("turn off", prompt)
 
-    def test_the_offer_is_worded_as_a_suggestion(self):
+    def test_a_confident_reading_is_offered_as_a_plan(self):
         self.fake.script = [tool_call("adopt_parse")]
         self.ask("turn off the living room AC")
 
         prompt = self.system_prompt()
-        self.assertIn("not an instruction", prompt)
+        self.assertIn("a plan, not an order", prompt)
+        self.assertIn("Adopt it with `adopt_parse` unless it is impossible", prompt)
+
+    def test_an_ambiguous_sentence_is_offered_as_a_suggestion_only(self):
+        """Two clauses wanting different things is not a plan, it is half of one.
+
+        Measured with one permissive wording for both cases: the model overrode
+        the complete plan with a worse appliance three runs out of three, and
+        had to override the half-plan to get it right. The parser's own
+        confidence is information the model cannot recover from the sentence,
+        so it has to be stated.
+        """
+        self.fake.script = [tool_call("adopt_parse")]
+        self.ask("cool the bedroom down and shut the living room off")
+
+        prompt = self.system_prompt()
+        self.assertIn("a suggestion, not an instruction", prompt)
         self.assertIn("not obliged to agree", prompt)
+
+    def test_there_is_no_adopt_tool_when_the_rules_had_no_reading(self):
+        """A tool that can only answer "nothing to adopt" is a trap.
+
+        Reaching for it and getting an error back is how "the bedroom is a
+        sauna" fell all the way through to the rules' generic help.
+        """
+        self.fake.script = [tool_call("finish", reply="Done.")]
+        self.ask("the bedroom is a sauna")
+
+        names = [t["function"]["name"] for t in self.fake.requests[0]["tools"]]
+        self.assertNotIn("adopt_parse", names)
+        self.assertIn("control", names)
 
     def test_a_question_outside_the_house_is_not_offered(self):
         """A refusal about what this house can see is not a judgement to revise.
@@ -169,7 +198,7 @@ class RejectTests(AgentModeTestBase):
         self.assertFalse(result["adopted"])
         self.assertIs(self.power("ac_bedroom"), False)
         self.assertIs(self.power("ac_living"), True)
-        self.assertEqual(len(result["trace"]), 2)
+        self.assertEqual(len(result["trace"]), 3)  # offer, control, finish
 
     def test_the_trace_names_the_rejected_offer_first(self):
         self.fake.script = [
@@ -180,7 +209,15 @@ class RejectTests(AgentModeTestBase):
         result = self.ask("turn off the living room AC")
 
         self.assertEqual([s["tool"] for s in result["trace"]],
-                         ["control", "finish"])
+                         ["offer", "control", "finish"])
+        # The point of the line: what was turned down, not just what was done.
+        self.assertIn("Living Room AC", result["trace"][0]["result"])
+
+    def test_an_accepted_offer_is_not_reported_as_declined(self):
+        self.fake.script = [tool_call("adopt_parse")]
+        result = self.ask("turn off the living room AC")
+
+        self.assertEqual([s["tool"] for s in result["trace"]], ["adopt_parse"])
 
 
 class FallbackTests(AgentModeTestBase):
@@ -192,6 +229,29 @@ class FallbackTests(AgentModeTestBase):
 
         self.assertIs(self.power("ac_living"), False)
         self.assertEqual(result["tier"], "rules")
+
+    def test_the_loop_is_not_run_twice_on_the_same_turn(self):
+        """Giving up in agent mode must not fall through to `_escalate`.
+
+        `_escalate` would hand the same sentence to the same loop a second time,
+        with a worse prompt, and pay for it — agent mode being slower *and* no
+        better is the one outcome it must never produce.
+        """
+        self.fake.script = []
+        self.ask("make it nicer in there")
+
+        self.assertEqual(len(self.fake.requests), 1)
+
+    def test_a_comfort_phrase_still_asks_instead_of_guessing(self):
+        """Which room someone is standing in is not something a tool can read.
+
+        The cascade learned this from "it's stuffy in here" switching on the
+        purifier; agent mode must not unlearn it by letting the loop try.
+        """
+        result = self.ask("it's stuffy in here")
+
+        self.assertEqual(self.fake.requests, [])
+        self.assertTrue(result.get("reply"))
 
     def test_cascade_mode_never_calls_a_model(self):
         self.turn_on("ac_living")

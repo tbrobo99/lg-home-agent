@@ -23,7 +23,21 @@ they are served by `run.py`, a static host, or a WebView.
 |---|---|
 | Devices | Room tabs, a temperature / humidity / running summary, the two-column device grid, quick actions, and the next scheduled task |
 | Schedule | Every task with its repeat rule and next run, plus per-task delete |
-| Assistant | The conversation, suggestion chips, and the composer |
+| Assistant | The decision-mode switch, the conversation, suggestion chips, and the composer |
+
+The Assistant tab opens with a **Cascade / Agent** switch. It is not a setting for
+the app — it is a setting for *how the sentence gets answered*, and it applies to
+everything, including the quick actions and the chips:
+
+- **Cascade** — code picks the layer from the shape of the sentence. ~1 ms for
+  anything the rules know.
+- **Agent** — the rules' reading is shown to the model as a suggestion and the
+  model keeps it or plans its own. Every reply then carries a collapsed line under
+  the bubble — *"declined the reading · 2 steps"* — which opens to the actual steps,
+  including the reading that was turned down.
+
+The switch posts to `/api/mode` and takes effect on the next message; `config.json`
+sets which one the app starts in.
 
 Tapping a device card opens a bottom sheet with the target temperature, the mode
 pills and a power button. Tapping the power button on the card itself toggles the

@@ -110,14 +110,25 @@ class Agent:
                                           default_room, fallback)
 
             # Agent mode hands the parse to the model instead of applying it.
+            deliberated = False
             if self._agent_mode() and self._worth_asking(intent):
+                deliberated = True
                 loop = self._deliberate(text, intent, devices, default_room, now)
                 if loop.get("handled"):
                     return self._finish_loop(loop, text, now, tier="agent")
 
             # Rules first. Whatever they could not finish goes to a model, and
             # which model it goes to is decided before any call is made.
-            escalated = self._escalate(text, intent, devices, default_room, now)
+            #
+            # Not when agent mode has already run the loop on this turn: the
+            # loop is the most capable layer there is, and it has just been
+            # given a better prompt than `_escalate` could build (the offer).
+            # Escalating anyway ran it a second time — measured, an `unknown`
+            # sentence the loop had already given up on paid for a second full
+            # loop before the rules answered, which is the one way agent mode
+            # could be slower *and* no better.
+            escalated = None if deliberated else self._escalate(
+                text, intent, devices, default_room, now)
             if escalated is not None:
                 if escalated.get("handled"):     # the tool loop answered
                     return self._finish_loop(escalated, text, now)
@@ -340,18 +351,34 @@ class Agent:
     def _worth_asking(intent: dict) -> bool:
         """Does this request contain a decision a model could disagree with?
 
+        Two carve-outs, each earned by a failure rather than by taste.
+
         `out_of_scope` is excluded for the opposite reason to the lookups: it is
         not a judgement about this house to revise, it is a statement about
         what this house can see, and a model let near a weather question
         invents a forecast.
+
+        A comfort phrase missing only the room is excluded because which room
+        someone is standing in is not something a tool can read. The cascade
+        learned that the hard way — "it's stuffy in here" handed to the loop
+        switched on the purifier, the wrong appliance for a temperature
+        complaint — and agent mode must not unlearn it.
         """
         kind = intent["intent"]
         if intent.get("out_of_scope"):
             return False
+        if kind == "need_target" and intent.get("comfort"):
+            return False
         return kind in AGENT_INTENTS or kind == "unknown" or kind.startswith("need_")
 
-    def describe_offer(self, intent: dict) -> dict:
+    def describe_offer(self, text: str, intent: dict, devices: list[dict],
+                       now: datetime) -> dict | None:
         """The parser's reading, worded for a model to accept or reject.
+
+        Returns None when the rules produced no reading at all (`unknown`, a
+        half-parsed `need_*`). There is then nothing to offer and nothing to
+        adopt, so the loop runs as a plain loop — the same thing tier 3 already
+        was in the cascade.
 
         It never runs anything. The reply to a `control` can only be written
         after the command lands, and an offer that acted would be a branch in
@@ -359,6 +386,9 @@ class Agent:
         what time — and leaves the wording to whichever layer does the work.
         """
         kind = intent["intent"]
+        if kind == "unknown" or kind.startswith("need_"):
+            return None
+
         targets = self._targets(intent)
         names = self._name_list([t["name"] for t in targets]) if targets else ""
         what = self.action_summary(intent.get("actions") or [])
@@ -381,7 +411,14 @@ class Agent:
                      else "cancel one scheduled task")
         else:
             would = intent.get("clarify") or f"handle a '{kind}' request"
-        return {"intent": kind, "would": would}
+
+        # A reading is only "sure" when the sentence had one reading. A parse
+        # that carries a clarify, or whose clauses want different things, is a
+        # fragment — and offering a fragment as a plan is how a model ends up
+        # accepting half a request.
+        sure = (not intent.get("clarify")
+                and not self._clauses_disagree(text, intent, devices, now))
+        return {"intent": kind, "would": would, "sure": sure}
 
     def _deliberate(self, text: str, intent: dict, devices: list[dict],
                     default_room: str, now: datetime) -> dict:
@@ -393,6 +430,8 @@ class Agent:
         in front of, so a model that cannot finish leaves the deterministic
         path in charge and the deterministic answer is what the user reads.
         """
+        offer = self.describe_offer(text, intent, devices, now)
+
         def carry_out():
             out = self._execute(intent, now)
             # `_execute` shapes a reply; the loop additionally needs to know
@@ -400,7 +439,7 @@ class Agent:
             return {**out, "targets": self._targets(intent)}
 
         return agent_loop.run(self.cfg, text, self.adapter, now, default_room,
-                              offer=self.describe_offer(intent), adopt=carry_out)
+                              offer=offer, adopt=carry_out if offer else None)
 
     def _resume_loop(self, text: str, devices: list[dict], default_room: str,
                      fallback: dict | None, now: datetime) -> list[dict] | None:

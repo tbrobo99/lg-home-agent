@@ -18,6 +18,7 @@
     "timeout": 20
   },
   "agent": {
-    "default_room": "Living Room"
+    "default_room": "Living Room",
+    "mode": "cascade"
   }
 }

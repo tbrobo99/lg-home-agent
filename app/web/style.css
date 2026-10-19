@@ -428,6 +428,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6;
   color: var(--ink-dim);
 }
 .msg .trace li { margin-bottom: 2px; }
+/* The reading the model turned down. Muted, because it is what did not happen. */
+.msg .trace li.offer { color: var(--ink-faint); font-style: italic; }
 
 .chat {
   flex: 1;
