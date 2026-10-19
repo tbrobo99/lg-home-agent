@@ -158,13 +158,14 @@ class ReplyTest(unittest.TestCase):
         answer to a question nobody asked.
         """
         reply = food.answer("apple", self.fridge())
-        self.assertIn("Apple keeps", reply)
+        self.assertIn("Apple goes in the fridge", reply)
         self.assertNotIn("Most fruit", reply)
 
     def test_a_qualifier_in_the_label_is_kept(self):
         """ "Rice" must not be answered as if it were cooked rice."""
-        self.assertIn("Cooked rice keeps", food.answer("rice", self.fridge()))
-        self.assertIn("Raw chicken keeps", food.answer("chicken", self.fridge()))
+        self.assertIn("Cooked rice goes in the fridge", food.answer("rice", self.fridge()))
+        self.assertIn("Raw chicken goes in the fridge if",
+                      food.answer("chicken", self.fridge()))
 
     def test_a_narrowed_label_says_which_one_it_means(self):
         """The table narrowed "rice" to cooked rice; the user did not.
@@ -195,7 +196,7 @@ class ReplyTest(unittest.TestCase):
         reply = food.answer("is the fridge cold enough for ice cream", self.fridge())
         self.assertNotIn("keeps it does not belong", reply)
         self.assertIn("does not belong in the fridge", reply)
-        self.assertIn("the freezer is the only place for it", reply)
+        self.assertIn("goes in the freezer, always", reply)
 
     def test_a_verdict_is_a_phrase_not_a_comparison_with_nothing(self):
         """ "8 °C is warmer than that likes" had no antecedent for "that"."""
@@ -230,6 +231,23 @@ class ReplyTest(unittest.TestCase):
         reply = food.answer("bacon", self.fridge())
         self.assertIn("a week or two", reply)
         self.assertNotIn("one to two days", reply)
+
+    def test_a_bare_ingredient_is_told_which_compartment(self):
+        """ "Apple keeps three to seven days · freezer: good frozen too" answers
+        neither question. Somebody holding an apple wants the compartment."""
+        reply = food.answer("apple", self.fridge())
+        self.assertIn("Apple goes in the fridge", reply)
+
+        # the other way round for fish, which is not improved by a day in the fridge
+        self.assertIn("Raw fish goes in the freezer", food.answer("fish", self.fridge()))
+
+    def test_raw_meat_is_a_condition_rather_than_a_compartment(self):
+        """When it goes in the fridge depends on when it will be cooked, and
+        saying so is more useful than picking one and being wrong."""
+        reply = food.answer("should I put the chicken in the fridge or the freezer",
+                            self.fridge())
+        self.assertIn("the fridge if you will use it within one to two days", reply)
+        self.assertIn("otherwise the freezer, where it keeps several months", reply)
 
     def test_the_longest_key_wins(self):
         """ "Ice cream" contains "cream", and cream belongs to milk."""

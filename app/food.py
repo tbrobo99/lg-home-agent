@@ -20,16 +20,24 @@ from __future__ import annotations
 
 import re
 
-# keys -> what to call it, how long it keeps in the fridge, how long in the
-# freezer, and an optional aside that qualifies the first number.
+# keys -> what to call it, which compartment to reach for, how long it keeps in
+# each, and an optional aside that qualifies the first number.
+#
+# `pick` is the part that answers the question people actually ask. "Apple keeps
+# three to seven days · freezer: good frozen too" is a table, not advice: the
+# user has an apple in their hand and wants to be told where to put it. So each
+# entry names the compartment it belongs in — or says the choice depends on when
+# you will cook it, which is the honest answer for raw meat.
 FOOD_TABLE: list[dict] = [
     {"keys": ["chicken", "hen", "poultry"],
      "label": "raw chicken",
+     "pick": "depends",
      "keeps": "one to two days",
      "frozen": "several months"},
     {"keys": ["beef", "pork", "lamb", "meat", "mince", "minced beef",
               "ground beef"],
      "label": "raw meat",
+     "pick": "depends",
      "keeps": "one to two days",
      "frozen": "several months"},
     # Cured meat was in the raw-meat entry, which told anyone asking about bacon
@@ -37,25 +45,30 @@ FOOD_TABLE: list[dict] = [
     # is the number that matters.
     {"keys": ["bacon", "sausage", "sausages", "ham", "salami", "chorizo"],
      "label": "cured meat",
+     "pick": "fridge",
      "keeps": "a week or two once opened",
      "aside": "the printed date decides",
-     "frozen": "freezes, though it does not need to"},
+     "frozen": "freezes fine, but there is no need"},
     {"keys": ["fish", "salmon", "tuna", "cod", "prawn", "prawns", "shrimp",
               "seafood", "crab"],
      "label": "raw fish",
+     "pick": "freezer",
      "keeps": "about a day",
      "frozen": "several months"},
     {"keys": ["milk", "cream"],
      "label": "milk",
+     "pick": "fridge",
      "keeps": "a few days",
      "aside": "the printed date decides",
      "frozen": "can be frozen but separates when thawed"},
     {"keys": ["egg", "eggs"],
      "label": "eggs",
+     "pick": "fridge",
      "keeps": "three to five weeks",
      "frozen": "only out of the shell"},
     {"keys": ["cooked rice", "leftover rice", "boiled rice", "rice"],
      "label": "cooked rice",
+     "pick": "fridge",
      "keeps": "about a day",
      "aside": "reheat only once",
      "frozen": "a month or more",
@@ -64,14 +77,17 @@ FOOD_TABLE: list[dict] = [
      "if_matched": {"rice": "Dry rice belongs in the cupboard, not the fridge."}},
     {"keys": ["leftovers", "leftover", "takeaway", "takeout"],
      "label": "leftovers",
+     "pick": "fridge",
      "keeps": "one to two days",
      "frozen": "a month or more"},
     {"keys": ["butter"],
      "label": "butter",
+     "pick": "fridge",
      "keeps": "a few weeks once opened",
      "frozen": "freezes well"},
     {"keys": ["cheese"],
      "label": "cheese",
+     "pick": "fridge",
      "keeps": "a few weeks once opened",
      "aside": "a hard cheese keeps longer",
      "frozen": "can be frozen, but crumbles when thawed"},
@@ -80,13 +96,15 @@ FOOD_TABLE: list[dict] = [
               "greens", "herb", "herbs", "mushroom", "mushrooms", "onion",
               "onions", "potato", "potatoes"],
      "label": "most vegetables",
+     "pick": "fridge",
      "keeps": "three to seven days",
-     "aside": "best kept away from the coldest part of the compartment",
+     "aside": "away from the coldest part",
      "frozen": "blanch first"},
     {"keys": ["fruit", "fruits", "berries", "strawberry", "strawberries",
               "banana", "bananas", "apple", "apples", "orange", "oranges",
               "grape", "grapes"],
      "label": "most fruit",
+     "pick": "fridge",
      "keeps": "three to seven days",
      "frozen": "good frozen too"},
     # No duration, so this entry is a sentence rather than a phrase: there is no
@@ -97,6 +115,7 @@ FOOD_TABLE: list[dict] = [
     {"keys": ["ice cream", "icecream"],
      "label": "ice cream",
      "keeps": None,
+     "line": "goes in the freezer, always: it does not belong in the fridge at all",
      "fresh": "does not belong in the fridge at all",
      "frozen": "the freezer is the only place for it"},
 ]
@@ -237,9 +256,44 @@ def _subject(food: dict) -> str:
     return subject[:1].upper() + subject[1:]
 
 
-def _verb(subject: str) -> str:
+def _verb(subject: str, singular: str = "keeps", plural: str = "keep") -> str:
     """keeps / keep — "Raw chicken keeps", "Vegetables keep"."""
-    return "keep" if subject.lower().endswith("s") else "keeps"
+    return plural if subject.lower().endswith("s") else singular
+
+
+def _guidance(food: dict, subject: str) -> list[str]:
+    """Where to put it, then how long it lasts there.
+
+    Order matters, and so does the verb. "Apple keeps three to seven days ·
+    freezer: good frozen too" lists two numbers and answers neither question:
+    somebody holding an apple wants to be told which compartment, and a reply
+    that names both is a table read aloud. So the first line says where the food
+    goes — *goes in the fridge*, not "fridge:" — and the other compartment
+    follows as the alternative it is.
+
+    Raw meat is the case where the honest answer is a condition rather than a
+    compartment: the fridge if you will cook it soon, the freezer otherwise, so
+    `pick: "depends"` says that instead of guessing when you eat.
+    """
+    if food.get("line"):
+        return [f"{subject} {food['line']}."]
+
+    keeps, frozen = food["keeps"], food["frozen"]
+    pick = food.get("pick", "fridge")
+
+    if pick == "freezer":
+        return [f"{subject} {_verb(subject, 'goes', 'go')} in the freezer — {frozen}",
+                f"Fridge: {keeps}"]
+
+    if pick == "depends":
+        return [f"{subject} {_verb(subject, 'goes', 'go')} in the fridge if you "
+                f"will use it within {keeps}; otherwise the freezer, where it "
+                f"keeps {frozen}."]
+
+    first = f"{subject} {_verb(subject, 'goes', 'go')} in the fridge — {keeps}"
+    if food.get("aside"):
+        first += f" ({food['aside']})"
+    return [first, f"Freezer: {frozen}"]
 
 
 def _note() -> str:
@@ -321,8 +375,9 @@ def answer(text: str, fridge: dict | None, note: bool = True) -> str:
     keeps = food.get("keeps")
 
     if keeps is None:
-        # Entries with no duration are already sentences.
-        lines.append(f"{subject} {food['fresh']} — {food['frozen']}.")
+        # An entry with no duration is stored as a sentence, and the sentence
+        # already says which compartment it belongs in.
+        lines.extend(_guidance(food, subject))
     elif wants_adequacy(text) and not wants_storage(text):
         # A judgement, not a comparison. If the user named a temperature, judge
         # that one and say what the house is actually at; otherwise judge the
@@ -350,15 +405,7 @@ def answer(text: str, fridge: dict | None, note: bool = True) -> str:
             lines.append(_note())
         return "\n".join(lines)
     else:
-        sentence = f"{subject} {_verb(subject)} {keeps}"
-        if food.get("aside"):
-            sentence += f" — {food['aside']}"
-        # The freezer on its own line rather than after a separator. On a phone
-        # the bubble is about forty characters wide, so "… · freezer: a month or
-        # more" broke after the dot and the second line began with a stray "·",
-        # which reads as a bullet that lost its item.
-        lines.append(sentence)
-        lines.append(f"freezer: {food['frozen']}")
+        lines.extend(_guidance(food, subject))
 
     # The label narrowed a word the user did not narrow; say which one is meant.
     narrowed = (food.get("if_matched") or {}).get(food.get("matched") or "")
