@@ -51,7 +51,7 @@ SENTENCES = [
 # `agent.handle` reports which tier answered, because intent names do not: a
 # tier 2 plan and a rule match both come back as "control".
 TIER = {"rules": "1 rules", "scene": "1 scene", "llm": "2 single-shot",
-        "loop": "3 loop"}
+        "loop": "3 loop", "agent": "3 agent"}
 
 
 def _actions(actions: list[dict]) -> str:
@@ -92,12 +92,19 @@ def main() -> int:
     ap.add_argument("--markdown", action="store_true", help="emit a markdown table")
     ap.add_argument("--only", choices=["1", "2", "3"], help="filter by tier")
     ap.add_argument("--json", action="store_true", help="emit raw JSON")
+    ap.add_argument("--agent", action="store_true",
+                    help="agent mode: the rules offer their reading to the "
+                         "model instead of applying it")
     args = ap.parse_args()
 
     cfg = config.load()
     if not llm.available(cfg):
         print("No llm.api_key in config.json — the cascade needs a model.")
         return 2
+    # Agent mode is measured on the same sentences as the cascade. That is the
+    # only comparison that says anything: what does letting the model decide
+    # buy, and what does it cost in time.
+    cfg.setdefault("agent", {})["mode"] = "agent" if args.agent else "cascade"
 
     tmp = tempfile.TemporaryDirectory()
     orig = (db.DATA_DIR, db.DB_PATH, mock_mod.STATE_PATH)
@@ -134,7 +141,8 @@ def main() -> int:
             print(f'| "{r["text"]}" | {r["tier"]} | {steps} | {r["ms"] / 1000:.1f}s | {did} |')
         return 0
 
-    print(f'Cascade over {len(rows)} utterances rules cannot parse '
+    label = "Agent mode" if args.agent else "Cascade"
+    print(f'{label} over {len(rows)} utterances rules cannot parse '
           f'(mock devices, model {model})\n')
     print(f'{"tier":<15}{"steps":>6}{"time":>7}  utterance')
     print("-" * 78)

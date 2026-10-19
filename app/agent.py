@@ -1,6 +1,6 @@
 """Agent loop: understand -> decide -> execute -> reply.
 
-Three boundaries matter here:
+Four boundaries matter here:
 
 1. Execution stays in deterministic code. When the rules or a single LLM pass
    produce an intent, `_execute` applies it — a model's job stops at naming an
@@ -12,6 +12,12 @@ Three boundaries matter here:
 3. Understanding is stateful. A request that is missing a slot ("it's stuffy")
    is remembered and completed by the next turn instead of being thrown away —
    see `_complete_pending`.
+4. Agent mode inverts boundary 2 for the rules. The cascade above is a
+   workflow: code decides which tier answers, so the model never gets to say
+   the parser was wrong. With `agent.mode = "agent"` the parse the rules did
+   make is handed to the loop as an *offer* instead of being applied, and the
+   model accepts it with one call or plans for itself. Same guardrails, same
+   benchmark — the difference is who decides.
 """
 from __future__ import annotations
 
@@ -47,6 +53,18 @@ SETTING_RE = re.compile(
 
 # Where one sentence can hold two requests.
 CLAUSE_SPLIT_RE = re.compile(r"\s+and\s+|\s*,\s*(?:and\s+)?|\s+then\s+", re.I)
+
+# Which intents contain a decision about the house, and are therefore worth
+# putting in front of a model in agent mode.
+#
+# Everything else the rules do is a lookup, not a decision: a storage answer is
+# an outside rule plus a measured temperature, a routine is a table, the task
+# list is a table. None of them has a tool, so deliberation can only add three
+# seconds to an answer the rules already have — measured on this build, "how
+# long can I keep the chicken" ran a full loop, gave up, and was answered by the
+# rules anyway. Keeping them out is not code choosing a tier; it is code
+# declining to ask about something there is nothing to decide.
+AGENT_INTENTS = frozenset({"control", "schedule", "query"})
 
 
 class Agent:
@@ -90,6 +108,12 @@ class Agent:
             intent = nlu.parse(text, devices, now, default_room, fallback)
             intent = self._retry_repaired(text, intent, devices, now,
                                           default_room, fallback)
+
+            # Agent mode hands the parse to the model instead of applying it.
+            if self._agent_mode() and self._worth_asking(intent):
+                loop = self._deliberate(text, intent, devices, default_room, now)
+                if loop.get("handled"):
+                    return self._finish_loop(loop, text, now, tier="agent")
 
             # Rules first. Whatever they could not finish goes to a model, and
             # which model it goes to is decided before any call is made.
@@ -301,6 +325,83 @@ class Agent:
             return bool(it.get("device_id"))
         return kind in ("cancel", "list")
 
+    # ------------------------------------------------ agent mode
+
+    def _agent_mode(self) -> bool:
+        """Is the model being allowed to disagree with the rules?
+
+        Read from config on every call, so the interface toggle takes effect on
+        the next message instead of the next restart.
+        """
+        mode = str((self.cfg.get("agent") or {}).get("mode") or "cascade").lower()
+        return mode == "agent"
+
+    @staticmethod
+    def _worth_asking(intent: dict) -> bool:
+        """Does this request contain a decision a model could disagree with?
+
+        `out_of_scope` is excluded for the opposite reason to the lookups: it is
+        not a judgement about this house to revise, it is a statement about
+        what this house can see, and a model let near a weather question
+        invents a forecast.
+        """
+        kind = intent["intent"]
+        if intent.get("out_of_scope"):
+            return False
+        return kind in AGENT_INTENTS or kind == "unknown" or kind.startswith("need_")
+
+    def describe_offer(self, intent: dict) -> dict:
+        """The parser's reading, worded for a model to accept or reject.
+
+        It never runs anything. The reply to a `control` can only be written
+        after the command lands, and an offer that acted would be a branch in
+        disguise. So the offer states the *plan* — which device, which action,
+        what time — and leaves the wording to whichever layer does the work.
+        """
+        kind = intent["intent"]
+        targets = self._targets(intent)
+        names = self._name_list([t["name"] for t in targets]) if targets else ""
+        what = self.action_summary(intent.get("actions") or [])
+
+        if kind == "control":
+            would = f"{what} \u2014 {names}" if names else (what or "change a device")
+        elif kind == "schedule":
+            when = intent.get("repeat_label") or "later"
+            would = f"{what} \u2014 {names}, {when}".strip(", ")
+        elif kind == "scene":
+            would = f"run the {intent.get('scene_label') or 'mood'} routine"
+        elif kind == "query":
+            would = f"report the state of {names}" if names else "report a device"
+        elif kind == "food":
+            would = f"answer it from {names or 'the fridge'}'s measured temperature"
+        elif kind == "list":
+            would = "list the scheduled tasks"
+        elif kind == "cancel":
+            would = ("cancel every scheduled task" if intent.get("cancel_all")
+                     else "cancel one scheduled task")
+        else:
+            would = intent.get("clarify") or f"handle a '{kind}' request"
+        return {"intent": kind, "would": would}
+
+    def _deliberate(self, text: str, intent: dict, devices: list[dict],
+                    default_room: str, now: datetime) -> dict:
+        """Put the parse in front of the model and let it decide.
+
+        Returns a loop result, or `{"handled": False}` to keep what the rules
+        produced. The second outcome is not a failure to be papered over: agent
+        mode must not make the system *less* reliable than the cascade it sits
+        in front of, so a model that cannot finish leaves the deterministic
+        path in charge and the deterministic answer is what the user reads.
+        """
+        def carry_out():
+            out = self._execute(intent, now)
+            # `_execute` shapes a reply; the loop additionally needs to know
+            # which devices were touched, which the parse knows better.
+            return {**out, "targets": self._targets(intent)}
+
+        return agent_loop.run(self.cfg, text, self.adapter, now, default_room,
+                              offer=self.describe_offer(intent), adopt=carry_out)
+
     def _resume_loop(self, text: str, devices: list[dict], default_room: str,
                      fallback: dict | None, now: datetime) -> list[dict] | None:
         """Transcript to resume, when this message answers a loop's question.
@@ -317,7 +418,8 @@ class Agent:
             return None
         return ctx["messages"]
 
-    def _finish_loop(self, loop: dict, text: str, now: datetime) -> dict:
+    def _finish_loop(self, loop: dict, text: str, now: datetime,
+                     tier: str = "loop") -> dict:
         """Record and return a turn that the tool loop handled itself."""
         if loop.get("awaiting") and loop.get("messages"):
             # Remember the exchange so the user's answer resumes it instead of
@@ -333,9 +435,13 @@ class Agent:
             "ok": bool(loop.get("ok")),
             "actions": loop.get("actions") or [],
             "intent_name": "agent_loop",
-            "tier": "loop",
+            "tier": tier,
             "raw_text": text,
             "steps": loop.get("steps"),
+            # What the model decided to do, in order. Empty when the rules
+            # answered; that difference is the whole point of showing it.
+            "trace": loop.get("trace") or [],
+            "adopted": bool(loop.get("adopted")),
         }
         targets = loop.get("targets") or []
         if targets:
@@ -346,6 +452,7 @@ class Agent:
             "intent": "agent_loop",
             "actions": result["actions"],
             "steps": result["steps"],
+            "trace": result["trace"],
         })
         return result
 
@@ -909,6 +1016,9 @@ class Agent:
             "jobs": jobs,
             "backend": getattr(self.adapter, "backend_name", "unknown"),
             "llm_enabled": llm.available(self.cfg),
+            # which of the two decision models is live, so the interface can
+            # say so instead of implying the one that happens to be on screen
+            "mode": "agent" if self._agent_mode() else "cascade",
             "awaiting": (self._pending or {}).get("missing"),
             "now": datetime.now().isoformat(timespec="seconds"),
         }

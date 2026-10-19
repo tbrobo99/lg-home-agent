@@ -167,6 +167,42 @@ send a wrong command to an appliance. No voice input yet, and the ThinQ control 
 to be calibrated per model — everything else in this demo runs from a clean clone with no
 dependencies."*
 
+## Optional beat — agent mode (30 s, run it if asked "is this really an agent?")
+
+Switch the Assistant tab to **Agent** at the top of the screen. The same sentence now goes
+through the model instead of being answered by the rules, and the reply carries the steps
+behind it — tap the little line under the bubble to open them.
+
+```
+the bedroom is a sauna
+→ get_state      read Bedroom AC — off
+→ control        Bedroom AC — turn on, switch to cooling, set to 24°C
+```
+
+Then flip back to **Cascade** and ask the same thing. Same outcome, ~1 ms, no steps to
+show, because code picked the layer and never asked the model anything.
+
+*"The cascade is a workflow: which layer answers is decided in code, from the shape of the
+sentence. That is fast and testable, and it is fair to say the model never gets a say. In
+agent mode the rules stop deciding and start offering — the parse is handed to the model as
+a suggestion, and it either accepts it in one step or plans its own. Everything the model
+can still do runs through the same validated toolbox, and if it cannot finish, the
+deterministic answer is the one you read."*
+
+Good sentences to use, in this order:
+
+| sentence | what to point at |
+|---|---|
+| `turn off the living room AC` | it usually *declines* the offer and calls `control` itself — the offer is not an instruction |
+| `the bedroom is a sauna` | it reads the state first; a cascade cannot do that without the loop |
+| `cool the bedroom down and shut the living room off` | two calls in one turn, a different action per room |
+| `how long can I keep the chicken` | answered instantly, no steps — a lookup has nothing to decide |
+
+That last row is the follow-up question to be ready for: *"Why not everything?"* Because
+some answers have no decision in them. A storage answer is an outside rule plus a measured
+temperature; the task list is a table. Neither has a tool, so putting them in front of a
+model added 8.8 seconds to a 15-millisecond answer and changed nothing.
+
 ## Things that look bad on video
 
 - Typing slowly. Paste the sentences.

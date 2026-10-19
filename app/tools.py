@@ -159,6 +159,18 @@ TOOL_SCHEMAS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "adopt_parse",
+            "description": "Accept the parser's reading of this sentence, shown in the "
+                           "system prompt, and carry it out in one step. Use it when the "
+                           "reading is right. Do not use it when the reading is wrong, "
+                           "incomplete, or the request needs something the reading does "
+                           "not cover — plan those yourself.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 
@@ -166,7 +178,8 @@ class ToolBox:
     """Executes tool calls and accumulates what the turn actually did."""
 
     def __init__(self, adapter, cfg: dict, now: datetime, default_room: str = "",
-                 rule: dict | None = None, rule_label: str = "") -> None:
+                 rule: dict | None = None, rule_label: str = "",
+                 adopt=None) -> None:
         self.adapter = adapter
         self.cfg = cfg
         self.now = now
@@ -176,6 +189,14 @@ class ToolBox:
         # request — "in 20 minutes" is not "now".
         self.rule = rule
         self.rule_label = rule_label
+        # In agent mode the parser does not act; it makes an offer. The model
+        # calls `adopt_parse` to accept it or ignores it and plans itself, which
+        # is the difference between a workflow and an agent that has a fast path.
+        self.adopt = adopt
+        self.adopted = False
+        # What the turn did, step by step, so the interface can show the work
+        # instead of asserting that work happened.
+        self.trace: list[dict] = []
 
         self.actions: list[dict] = []
         self.targets: list[dict] = []
@@ -192,15 +213,17 @@ class ToolBox:
         if handler is None:
             return {"error": f"no such tool: {name}",
                     "available": ["list_devices", "get_state", "control",
-                                  "schedule", "ask_user", "finish"]}
+                                  "schedule", "ask_user", "finish", "adopt_parse"]}
         if not isinstance(args, dict):
             return {"error": "arguments must be an object"}
         try:
-            return handler(**args)
+            out = handler(**args)
         except TypeError as exc:
             return {"error": f"bad arguments: {exc}"}
         except Exception as exc:  # a tool must never take the turn down with it
             return {"error": f"{type(exc).__name__}: {exc}"}
+        self.trace.append({"tool": name, "args": args, "result": _trace_line(out)})
+        return out
 
     def _devices(self) -> list[dict]:
         return self.adapter.list_devices()
@@ -417,7 +440,21 @@ class ToolBox:
     def _t_finish(self, reply: str = "") -> dict:
         self.reply = clean_reply(reply) or None
         self.finished = True
-        return {"ok": True}
+        return {"ok": True, "replied": self.reply or ""}
+
+    def _t_adopt_parse(self) -> dict:
+        """Carry out the parser's reading. The model chose to trust it."""
+        if self.adopt is None:
+            return {"error": "there is no parser reading for this turn"}
+        out = self.adopt() or {}
+        self.adopted = True
+        self.reply = out.get("reply")
+        self.actions = out.get("actions") or []
+        self.targets = out.get("targets") or []
+        self.finished = True
+        return {"ok": bool(out.get("ok")),
+                "done": self.reply,
+                "actions": self.actions}
 
     # ------------------------------------------------ result
 
@@ -444,6 +481,40 @@ class ToolBox:
             tail = ", ".join(_short(a) for a in acts) if acts else "done"
             parts.append(f"{name} {tail}")
         return "Done \u2014 " + "; ".join(parts) + "."
+
+
+def _trace_line(out: dict) -> str:
+    """One line for the turn trace: what a tool *did*, not what it returned.
+
+    Shown to the user, so it reads as a decision, not as a JSON blob. The
+    failure branch is the one that earns the most — a step that came back
+    `{"error": ...}` is the loop recovering from itself, and hiding it makes
+    the agent look like a pipeline that never fails.
+    """
+    if not isinstance(out, dict):
+        return ""
+    if out.get("error"):
+        head = str(out["error"])
+        return head[:1].upper() + head[1:]
+    if "devices" in out:
+        return f"listed {len(out['devices'])} devices"
+    if "did" in out:
+        return f"{out.get('device')} \u2014 {out['did']}"
+    if "job_id" in out:
+        return f"scheduled {out.get('device')} ({out.get('repeat')})"
+    if "asked" in out:
+        return "asked a question"
+    if "replied" in out:
+        return "replied to the user"
+    if "done" in out:
+        done = str(out["done"] or "").strip().replace("\n", " / ")
+        return f"adopted the parser's reading \u2014 {done[:60]}"
+    if "state" in out:
+        state = out.get("state") or {}
+        power = state.get("power")
+        want = "on" if power else ("off" if power is not None else "unknown")
+        return f"read {out.get('device')} \u2014 {want}"
+    return "done"
 
 
 def _short(a: dict) -> str:

@@ -365,6 +365,70 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6;
 
 .chat-view { display: flex; flex-direction: column; padding-bottom: 0; }
 
+/* How it decides. Sits above the transcript because the transcript is the
+   evidence: in agent mode each reply carries the steps behind it. */
+.mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0 8px;
+  min-width: 0;
+}
+.mode-switch {
+  display: flex;
+  flex: 0 0 auto;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid var(--card-line);
+}
+.mode-switch button {
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.mode-switch button.active {
+  background: var(--ink);
+  color: var(--ink-dark);
+  font-weight: 500;
+}
+.mode-note {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--ink-faint);
+}
+
+/* The steps behind a reply, collapsed by default — it is evidence, not prose. */
+.msg .trace {
+  margin: 7px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, .12);
+}
+.msg .trace summary {
+  font-size: 11px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  list-style: none;
+}
+.msg .trace summary::-webkit-details-marker { display: none; }
+.msg .trace summary::after { content: " \203A"; }
+.msg .trace ol {
+  margin: 5px 0 0;
+  padding-left: 15px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+.msg .trace li { margin-bottom: 2px; }
+
 .chat {
   flex: 1;
   overflow-y: auto;

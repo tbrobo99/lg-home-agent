@@ -30,6 +30,11 @@ DEFAULTS: dict = {
     "agent": {
         # used when the user does not name a room
         "default_room": "Living Room",
+        # cascade = code picks the tier from the shape of the request (the
+        #           benchmark's mode; deterministic, ~1 ms for the rules)
+        # agent   = the model sees the rules' reading and keeps it or throws it
+        #           away; one extra round trip, and a decision the model makes
+        "mode": "cascade",
     },
 }
 

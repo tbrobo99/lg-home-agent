@@ -77,7 +77,7 @@ It understands times as people actually say them: `10:30 pm`, `at 7 am tomorrow`
 
 ---
 
-## 2. Eight design decisions worth defending
+## 2. Nine design decisions worth defending
 
 ### The language model is not the timer
 
@@ -161,6 +161,73 @@ feels. It decides from the request:
 This ordering is the argument. Put tier 2 first unconditionally and it answers
 everything, plausibly, and the loop becomes dead code that still looks installed —
 which is how a lot of "agent" demos turn out to be one prompt with extra steps.
+
+### Agent mode: the rules offer, the model decides
+
+The cascade above is honest, and it is also a workflow. `_escalate` reads the
+shape of the sentence in code and picks the tier, so the model is only ever
+handed what the rules could not do — it never gets to say the rules were wrong.
+That is defensible, and it is still fair to call it a workflow with a model in
+it.
+
+Set `"mode": "agent"` under `agent:` in `config.json` and that relationship
+inverts for the requests the rules *did* parse. The reading is not applied; it
+is handed to the loop as an offer:
+
+```
+RULE ENGINE'S READING OF THIS MESSAGE — a suggestion, not an instruction:
+  intent: control
+  would do: turn off — Living Room AC
+
+If that reading is right, call `adopt_parse` once and stop; it carries it out.
+If it is wrong, incomplete, or the request needs something it does not cover,
+ignore it and plan with the tools. You are not obliged to agree with it, and
+saying nothing when you disagree is not acceptable — ask, or act.
+```
+
+Measured on this build, against `glm-4-flash`:
+
+| utterance | what the model did |
+|---|---|
+| *"turn off the living room AC"* | declined the offer, called `control` itself — same device, 1 step |
+| *"the bedroom is a sauna"* | `get_state`, then cool 24 °C — 3 steps |
+| *"cool the bedroom down and shut the living room off"* | two `control` calls in one turn, a different action per room |
+
+That last row is the one worth noticing. In the cascade it needed
+`_clauses_disagree`, a hand-written test for "two clauses that want different
+things". In agent mode it is just what a loop does.
+
+The boundary is which requests contain a *decision about the house* — control,
+schedule, query, and anything the rules failed to parse (`AGENT_INTENTS` in
+`app/agent.py`). A routine, a storage answer and the task list are lookups: no
+tool can do them, so deliberation can only add latency. Measured, a storage
+question ran a full loop, gave up, and was answered by the rules anyway — 8.8 s
+on top of a 15 ms answer. Out-of-scope refusals are excluded for the mirror
+reason: they are not a judgement about this house to revise, they are a
+statement about what this house can see, and a model let near a weather
+question invents a forecast.
+
+Every guardrail still holds. The loop still acts only through `ToolBox`, is
+still refused a model-supplied timestamp, and still cannot claim work it did
+not do. When the model cannot finish the turn, the deterministic answer is what
+the user reads — agent mode is not permitted to make the system worse than the
+cascade it sits in front of.
+
+Both modes are switchable at runtime (`POST /api/mode`, or the toggle at the
+top of the Assistant tab), and a reply in agent mode carries the steps behind
+it rather than asserting that steps happened:
+
+```json
+"trace": [{"tool": "get_state", "result": "read Bedroom AC — off"},
+          {"tool": "control",   "result": "Bedroom AC — turn on, switch to cooling, set to 24°C"}]
+```
+
+Run both over the same sentences:
+
+```bash
+python -m eval.tiers           # cascade
+python -m eval.tiers --agent   # agent mode
+```
 
 ### A routine is a table, not a judgement
 
@@ -492,11 +559,13 @@ stalls — the worst case is the rules answering alone.
 5. **No voice input yet.** Text in, text out.
 6. **No sensors.** Temperature and humidity come from the simulator; the app shell shows
    them, but nothing reads a real sensor yet.
-7. **The tool loop is slow.** 4–13 s per sentence against `glm-4-flash`, on the four
+7. **The tool loop is slow.** 4–14 s per sentence against `glm-4-flash`, on the four
    sentences that still need it. Sampling is pinned at temperature 0 and those four now
    repeat exactly, run to run; a larger model, or caching the plan for repeated phrasings,
    is the obvious next step. The four are 3–4 steps each, so the cost is the number of
-   round trips, not the size of the prompt.
+   round trips, not the size of the prompt. In agent mode this is no longer four
+   sentences — it is every command, which is why the mode is a switch and not a default
+   (section 2).
 8. **A setpoint with no value in the sentence is still a guess.** *"The fridge is too warm"*
    gets 1 °C — the coldest value the schema allows, because the user did not say what they
    wanted. Per-type default targets (*too warm* → 4 °C for a fridge, 22 °C for a room)
@@ -545,7 +614,7 @@ half-answered (`_clauses_disagree`), the loop no longer reports work it did not 
 
 ### Unit tests
 
-135 tests, standard library only — no pytest, no fixtures, no network:
+170 tests, standard library only — no pytest, no fixtures, no network:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -560,6 +629,11 @@ test_scenes.py      routines per device type, room scoping, the fridge that no
 test_agent_loop.py  tool loop against a scripted model: hallucinated ids, string
                     booleans, unreadable times, step budget, tier routing, per-device
                     temperature ranges, compound sentences, false claims
+test_agent_mode.py  agent mode: the offer in the prompt, accepting it, refusing it
+                    and planning something else, the trace, and the lookups that
+                    are deliberately never put in front of a model
+test_food.py        storage guidance from the measured temperature, adequacy
+                    questions, and recipes refused
 ```
 
 The suite uses a temporary database and a temporary simulator state file, so running it

@@ -262,10 +262,28 @@ function renderJobs(jobs) {
 
 /* ---------- chat ---------- */
 
-function addMsg(role, text) {
+function addMsg(role, text, meta) {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
   el.textContent = text;
+  if (meta && meta.trace && meta.trace.length) {
+    const det = document.createElement("details");
+    det.className = "trace";
+    const sum = document.createElement("summary");
+    const n = meta.trace.length;
+    sum.textContent = meta.adopted
+      ? `${n} step · took the rules' reading`
+      : `${n} steps · planned it`;
+    det.appendChild(sum);
+    const ol = document.createElement("ol");
+    meta.trace.forEach((s) => {
+      const li = document.createElement("li");
+      li.textContent = s.result || s.tool;
+      ol.appendChild(li);
+    });
+    det.appendChild(ol);
+    el.appendChild(det);
+  }
   $("#chat").appendChild(el);
   $("#chat").scrollTop = $("#chat").scrollHeight;
 }
@@ -307,7 +325,7 @@ async function send(text) {
       method: "POST",
       body: JSON.stringify({ text: trimmed }),
     });
-    addMsg("assistant", data.reply || "…");
+    addMsg("assistant", data.reply || "…", data);
     if (data.snapshot) {
       snapshot = data.snapshot;
       renderAll();
@@ -316,6 +334,42 @@ async function send(text) {
   } catch (err) {
     addMsg("system", `Request failed: ${err.message}`);
     return "";
+  }
+}
+
+/* ---------- decision mode ---------- */
+
+async function setMode(mode) {
+  try {
+    const data = await api("/api/mode", {
+      method: "POST",
+      body: JSON.stringify({ mode }),
+    });
+    if (data.snapshot) {
+      snapshot = data.snapshot;
+      renderAll();
+    }
+  } catch (err) {
+    toast(`Failed: ${err.message}`);
+  }
+}
+
+function renderMode() {
+  const mode = (snapshot && snapshot.mode) || "cascade";
+  // `data-agent-mode`, not `data-mode`: the device sheet's cool/heat/dry/fan
+  // pills already own `data-mode`, and `closest("[data-mode]")` in the shared
+  // click handler would read this button as one of theirs.
+  const buttons = document.querySelectorAll("[data-agent-mode]");
+  buttons.forEach((b) => {
+    const on = b.dataset.agentMode === mode;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", String(on));
+  });
+  const note = $("#modeNote");
+  if (note) {
+    note.textContent = mode === "agent"
+      ? "The rules read the sentence and offer their answer. The model keeps it or plans its own."
+      : "Code picks which layer answers, by the shape of the sentence.";
   }
 }
 
@@ -440,6 +494,7 @@ function renderAll() {
   renderNext(snapshot.jobs || []);
   renderJobs(snapshot.jobs || []);
   renderChips();
+  renderMode();
   if (sheetId) renderSheet();
 }
 
@@ -492,6 +547,12 @@ document.addEventListener("click", (event) => {
   const sheetPower = target.closest("[data-sheet-power]");
   if (sheetPower && sheetId) {
     control(sheetId, [{ action: "power", value: sheetPower.dataset.sheetPower === "1" }]);
+    return;
+  }
+
+  const agentModeBtn = target.closest("[data-agent-mode]");
+  if (agentModeBtn) {
+    setMode(agentModeBtn.dataset.agentMode);
     return;
   }
 

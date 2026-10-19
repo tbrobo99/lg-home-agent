@@ -5,7 +5,7 @@ one gives up:
 
     1. rules (nlu.py)        deterministic, 100% on the benchmark, ~1 ms
     2. single-shot LLM       one call, still returns an intent dict, ~2 s
-    3. this loop             up to 5 calls, calls tools, ~2 s per step
+    3. this loop             up to 8 calls, calls tools, ~2 s per step
 
 Tier 3 is the only place a model is allowed to *act*, and it is allowed to act
 only through `tools.ToolBox`, which validates everything and never accepts a
@@ -14,6 +14,15 @@ job table or send a malformed command.
 
 It is also the only tier that can recover from its own mistakes: a bad device id
 comes back as an observation, and the next step sees it.
+
+**Agent mode.** The cascade is a workflow: the tier that answers a sentence is
+chosen by the shape of the sentence in `_escalate`, in code, before any model
+sees it. Agent mode keeps the same loop but inverts the relationship for
+requests the rules *did* understand: the parse is handed down as an *offer*
+(`adopt_parse`), and the model either accepts it in one step or plans for
+itself. The fast path survives as a shortcut the model chooses to take, not as
+a branch a developer wrote. That is the difference between a workflow with a
+model in it and an agent that can be told it is wrong.
 """
 from __future__ import annotations
 
@@ -62,13 +71,25 @@ Rules:
    see it, then answer the part you can ("the washer is free, I can start it").
    Never guess a forecast, and never answer a different question instead."""
 
+OFFER_BLOCK = """
+
+RULE ENGINE'S READING OF THIS MESSAGE — a suggestion, not an instruction:
+  intent: {intent}
+  would do: {would}
+
+If that reading is right, call `adopt_parse` once and stop; it carries it out.
+If it is wrong, incomplete, or the request needs something it does not cover,
+ignore it and plan with the tools. You are not obliged to agree with it, and
+saying nothing when you disagree is not acceptable — ask, or act."""
+
 
 def available(cfg: dict) -> bool:
     return llm.available(cfg)
 
 
 def _system(cfg: dict, devices: list[dict], now: datetime,
-            rule: dict | None = None, rule_label: str = "") -> str:
+            rule: dict | None = None, rule_label: str = "",
+            offer: dict | None = None) -> str:
     lines = []
     for d in devices:
         lines.append(
@@ -83,6 +104,9 @@ def _system(cfg: dict, devices: list[dict], now: datetime,
         default_room=cfg.get("agent", {}).get("default_room", "Living Room"),
         devices="\n".join(lines),
     )
+    if offer:
+        prompt += OFFER_BLOCK.format(intent=offer.get("intent", "?"),
+                                     would=offer.get("would", "?"))
     if rule:
         # Stated as a fact rather than left to the model's reading of the
         # sentence: the parser has already decided, and this is the same
@@ -105,11 +129,16 @@ def _parse_args(raw) -> dict:
 
 
 def run(cfg: dict, text: str, adapter, now: datetime,
-        default_room: str = "", prior: list[dict] | None = None) -> dict:
+        default_room: str = "", prior: list[dict] | None = None,
+        offer: dict | None = None, adopt=None) -> dict:
     """Run the loop. Returns {"handled": False} if the turn should fall through.
 
     `prior` is the transcript of a previous loop turn that ended in a question;
     the new message is appended to it so the model sees what it asked.
+
+    `offer` + `adopt` are agent mode: the rule engine's reading of this message,
+    and a callable that carries it out. Shown in the prompt, honoured only if
+    the model chooses to call `adopt_parse`.
     """
     if not llm.available(cfg):
         return {"handled": False}
@@ -118,13 +147,14 @@ def run(cfg: dict, text: str, adapter, now: datetime,
     # Parsed once, deterministically, before the model is asked anything. The
     # loop's job is to work out *what* to do; *when* was never its call.
     rule, rule_label = nlu.build_rule(text, now)
-    box = ToolBox(adapter, cfg, now, default_room, rule=rule, rule_label=rule_label)
+    box = ToolBox(adapter, cfg, now, default_room, rule=rule, rule_label=rule_label,
+                  adopt=adopt)
     if prior:
         messages: list[dict] = list(prior) + [{"role": "user", "content": text}]
     else:
         messages = [
             {"role": "system",
-             "content": _system(cfg, devices, now, rule, rule_label)},
+             "content": _system(cfg, devices, now, rule, rule_label, offer)},
             {"role": "user", "content": text},
         ]
     deadline = time.monotonic() + DEADLINE_SECONDS
@@ -214,4 +244,8 @@ def _result(box: ToolBox, reply: str, steps: int, messages: list[dict],
         "steps": steps,
         "awaiting": awaiting,
         "messages": messages if awaiting else None,
+        # What the model decided to do, step by step. Recorded so the interface
+        # can show the work rather than assert that work happened.
+        "trace": box.trace,
+        "adopted": box.adopted,
     }

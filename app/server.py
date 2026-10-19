@@ -80,6 +80,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._static("index.html")
         if path == "/api/snapshot":
             return self._json(self.agent_ref.snapshot())
+        if path == "/api/mode":
+            return self._json({"mode": self.agent_ref.snapshot()["mode"]})
         if path == "/api/messages":
             return self._json({"messages": db.recent_messages(60)})
         if path == "/api/logs":
@@ -98,6 +100,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "text must not be empty"}, 400)
             result = self.agent_ref.handle(text)
             return self._json({**result, "snapshot": self.agent_ref.snapshot()})
+
+        if path == "/api/mode":
+            # Switched live, not on restart: the point of the two modes is that
+            # the same sentence can be asked of both, one after the other.
+            mode = str(body.get("mode") or "").lower()
+            if mode not in ("cascade", "agent"):
+                return self._json({"error": "mode must be cascade or agent"}, 400)
+            self.agent_ref.cfg.setdefault("agent", {})["mode"] = mode
+            return self._json({"ok": True, "mode": mode,
+                               "snapshot": self.agent_ref.snapshot()})
 
         if path == "/api/control":
             device_id = body.get("device_id")

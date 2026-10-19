@@ -103,6 +103,13 @@
     </section>
 
     <section class="view chat-view" id="view-chat" hidden>
+      <div class="mode-bar">
+        <div class="mode-switch" id="modeSwitch" role="group" aria-label="How it decides">
+          <button type="button" data-agent-mode="cascade" aria-pressed="false">Cascade</button>
+          <button type="button" data-agent-mode="agent" aria-pressed="false">Agent</button>
+        </div>
+        <p class="mode-note" id="modeNote"></p>
+      </div>
       <div class="chat" id="chat"></div>
       <div class="chips" id="chips"></div>
       <form class="composer" id="composer">
