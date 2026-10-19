@@ -222,12 +222,15 @@ it rather than asserting that steps happened:
           {"tool": "control",   "result": "Bedroom AC — turn on, switch to cooling, set to 24°C"}]
 ```
 
-Run both over the same sentences:
+Run both over the same 15 sentences:
 
 ```bash
-python -m eval.tiers           # cascade
-python -m eval.tiers --agent   # agent mode
+python -m eval.tiers           # cascade:     30.5 s, 4 sentences through a model
+python -m eval.tiers --agent   # agent mode:  83.6 s, 9 sentences through a model
 ```
+
+That is the trade, stated as a number: agency costs 2.7× the wall clock, and
+buys a model that can read a room before it changes it.
 
 ### A routine is a table, not a judgement
 

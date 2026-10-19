@@ -150,7 +150,9 @@ def main() -> int:
         steps = r["steps"] or "-"
         print(f'{r["tier"]:<15}{steps:>6}{r["ms"] / 1000:>6.1f}s  {r["text"]}')
 
-    loop = [r for r in rows if r["tier"] == "3 loop"]
+    # Agent mode reports "3 agent" for the same loop, so count both names —
+    # otherwise the summary says "loop 0" while nine rows went through one.
+    loop = [r for r in rows if r["tier"] in ("3 loop", "3 agent")]
     single = [r for r in rows if r["tier"] == "2 single-shot"]
     asked = [r for r in rows if r["asked"]]
     # "no answer" means the cascade stopped short, not that a device refused:
