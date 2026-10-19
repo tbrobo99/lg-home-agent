@@ -17,7 +17,7 @@ import difflib
 import re
 from datetime import datetime, timedelta
 
-from . import scenes
+from . import food, scenes
 
 # ---------------------------------------------------------------- numbers
 
@@ -500,6 +500,19 @@ OUT_OF_SCOPE: list[tuple[re.Pattern, str]] = [
                 r"traffic|flight|order (?:a|some|me)|book (?:a|me))\b", re.I),
      "That is outside this house — I can only work the appliances. I can start "
      "the washer, set a timer, or read what a device is doing."),
+    # Cooking is the line this project draws on purpose. A recipe is a sentence
+    # any model can write, nothing in it comes from this house, and no one here
+    # can check it. Storage advice is the opposite: it pairs a rule from outside
+    # with a temperature read from the appliance, which is why it is answered
+    # and this is not.
+    (re.compile(r"\b(?:recipe|recipes|cook|cooking|make (?:me |us )?"
+                r"(?:a|some|dinner|lunch|breakfast)|ingredient|ingredients|"
+                r"what (?:can|should) i (?:make|cook)|seasoning|marinade)\b",
+                re.I),
+     "I do not suggest recipes — a recipe would be invented, and nothing in it "
+     "would come from this house. What I can tell you is how long an ingredient "
+     "keeps and what the refrigerator is actually running at: try \"how long "
+     "can I keep the chicken\" or \"is the fridge cold enough for vegetables\"."),
 ]
 
 
@@ -553,6 +566,10 @@ it's that this is are be do does make makes
 
 def _vocab(devices: list[dict]) -> set[str]:
     words = set(DOMAIN_WORDS)
+    # Ingredients are vocabulary of this house now: "chiken" is as much a
+    # near-miss as "bedrom" is, and getting it wrong sends the sentence to the
+    # refusal path instead of to the storage answer.
+    words.update(k for entry in food.FOOD_TABLE for k in entry["keys"])
     for d in devices:
         for field in ("name", "room", "type"):
             words.update(re.findall(r"[a-z]+", (d.get(field) or "").lower()))
@@ -692,7 +709,19 @@ def parse(text: str, devices: list[dict], now: datetime | None = None,
             res.update(rule=rule, repeat_label=label)
         return res
 
-    # 3. an air-quality complaint goes to the purifier, not to whatever sits in
+    # 3. storing food is not operating a device. It has to be decided before the
+    # steps below, because the sentence names a device and reads like a feeling:
+    # "is the fridge cold enough for vegetables" would otherwise reach the
+    # comfort rules, and "cold" there maps to heating the fridge to 24 °C.
+    # Measured twice, with and without a previous turn, same wrong result.
+    if food.is_food_request(t):
+        fridge = next((d for d in devices if d.get("type") == "refrigerator"
+                       and d.get("online", True)), None)
+        res.update(intent="food", confidence=0.9, food=True)
+        set_targets(res, [fridge] if fridge else [])
+        return res
+
+    # 4. an air-quality complaint goes to the purifier, not to whatever sits in
     # the room that was mentioned.
     if not names_a_device(t, devices):
         air = extract_air(t)

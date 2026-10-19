@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
-from . import agent_loop, db, llm, nlu, scenes
+from . import agent_loop, db, food, llm, nlu, scenes
 from .devices.base import FAN_LABELS, MODE_LABELS, describe_action
 
 # how long a half-finished request stays open
@@ -408,6 +408,8 @@ class Agent:
         kind = it["intent"]
         if kind == "query":
             return self._do_query(it)
+        if kind == "food":
+            return self._do_food(it)
         if kind == "control":
             return self._do_control(it)
         if kind == "scene":
@@ -752,6 +754,24 @@ class Agent:
         if it.get("clarify"):
             reply += "\n" + it["clarify"]
         return {"reply": reply, "ok": True, "actions": [], "state": state}
+
+    def _do_food(self, it: dict) -> dict:
+        """Storage guidance, built from the appliance reading.
+
+        The model is deliberately not consulted. A model has no food-safety data
+        and happily invents one: measured on this build, "should I put the
+        chicken in the fridge or the freezer" was answered "the chicken can be
+        put in either", which is true in the way that "drive carefully" is advice
+        — technically, uselessly, and dangerously for raw poultry.
+        """
+        targets = self._targets(it)
+        fridge = None
+        if targets:
+            device = self.adapter.get_device(targets[0]["id"])
+            if device:
+                fridge = {**device, "state": self.adapter.get_state(device["id"])}
+        reply = food.answer(it.get("raw_text", ""), fridge)
+        return {"reply": reply, "ok": True, "actions": [], "state": None}
 
     # ------------------------------------------------ phrasing
 
