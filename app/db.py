@@ -6,6 +6,7 @@ expired token must never silently lose a pending job.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import uuid
@@ -14,7 +15,8 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data"
+# A hosted copy keeps its data on a mounted volume, not inside the source tree.
+DATA_DIR = Path(os.environ.get("DATA_DIR") or (ROOT / "data"))
 DB_PATH = DATA_DIR / "app.db"
 
 _lock = threading.RLock()

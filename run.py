@@ -11,6 +11,7 @@ network you trust -- see docs/DEPLOY.md.
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import sys
 import threading
@@ -72,7 +73,10 @@ def main() -> None:
     scheduler = Scheduler(adapter)
     scheduler.start()
 
-    host = "0.0.0.0" if args.lan else cfg["server"]["host"]
+    # A hosted copy gets its port from the platform and must listen on all
+    # interfaces; there is no `--lan` to pass there.
+    hosted = bool(os.environ.get("PORT"))
+    host = "0.0.0.0" if (args.lan or hosted) else cfg["server"]["host"]
     port = args.port or int(cfg["server"]["port"])
     try:
         httpd = serve(agent, host, port)

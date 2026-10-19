@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -43,14 +44,38 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
+def _env_overrides(cfg: dict) -> dict:
+    """Environment beats config.json.
+
+    A hosted copy must never need a key committed to the repository, and the
+    hosting platform decides the port. Both arrive as environment variables.
+    """
+    e = os.environ
+    if e.get("LLM_API_KEY"):
+        cfg["llm"]["api_key"] = e["LLM_API_KEY"]
+        cfg["llm"]["enabled"] = True
+    if e.get("LLM_BASE_URL"):
+        cfg["llm"]["base_url"] = e["LLM_BASE_URL"]
+    if e.get("LLM_MODEL"):
+        cfg["llm"]["model"] = e["LLM_MODEL"]
+    if e.get("PORT"):
+        try:
+            cfg["server"]["port"] = int(e["PORT"])
+        except ValueError:
+            pass
+    if e.get("HOST"):
+        cfg["server"]["host"] = e["HOST"]
+    return cfg
+
+
 def load() -> dict:
     if CONFIG_PATH.exists():
         try:
             user_cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         except Exception:
             user_cfg = {}
-        return _deep_merge(DEFAULTS, user_cfg)
-    return copy.deepcopy(DEFAULTS)
+        return _env_overrides(_deep_merge(DEFAULTS, user_cfg))
+    return _env_overrides(copy.deepcopy(DEFAULTS))
 
 
 def save(cfg: dict) -> None:
