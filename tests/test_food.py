@@ -93,6 +93,41 @@ class ParseOrderTest(unittest.TestCase):
         self.assertTrue(it.get("out_of_scope"))
         self.assertIn("recipe", it["clarify"].lower())
 
+    def test_an_unknown_food_is_still_a_food_question(self):
+        """ "Where do I keep the mango" reached the generic help text.
+
+        The table has never heard of a mango, but the sentence is still a storage
+        question, and the house can still answer half of it.
+        """
+        for text in ("where do I keep the mango", "should I put tofu in the fridge",
+                     "how long does avocado keep", "put the beer in the fridge"):
+            it = nlu.parse(text, DEVICES, None, "Kitchen")
+            self.assertEqual(it["intent"], "food", text)
+
+    def test_a_command_about_another_appliance_is_not_food(self):
+        for text in ("keep the washer on", "how long does the washer take",
+                     "put the AC on 24"):
+            it = nlu.parse(text, DEVICES, None, "Living Room")
+            self.assertNotEqual(it["intent"], "food", text)
+
+    def test_a_cold_room_is_not_a_storage_question(self):
+        """The first cut of the unknown-food rule matched any storage verb.
+
+        "the bedroom is freezing" contains "freezing", and the benchmark caught
+        it before a person did: one of 65 sentences flipped from control to food.
+        """
+        for text in ("the bedroom is freezing", "keep the bedroom cool",
+                     "how long does the washer take"):
+            self.assertFalse(food.is_unknown_storage(text), text)
+
+    def test_the_cover_list_names_every_entry(self):
+        """The list is read by a person, so it is written by hand — and pinned
+        here so it cannot drift when an entry is added."""
+        for noun in food.COVERS:
+            self.assertTrue(
+                any(noun in key for e in food.FOOD_TABLE for key in e["keys"]),
+                f"{noun} is in COVERS but no entry matches it")
+
 
 class ReplyTest(unittest.TestCase):
     def setUp(self):
@@ -248,6 +283,20 @@ class ReplyTest(unittest.TestCase):
                             self.fridge())
         self.assertIn("the fridge if you will use it within one to two days", reply)
         self.assertIn("otherwise the freezer, where it keeps several months", reply)
+
+    def test_an_unknown_food_is_a_boundary_not_a_guess(self):
+        """The alternative is a model inventing a number of days, and nobody can
+        check a number a model invented."""
+        reply = food.answer("where do I keep the mango", self.fridge())
+        self.assertIn("I do not have a storage rule for that one", reply)
+        self.assertIn("chicken", reply)
+        self.assertNotIn("days", reply.split("\n")[1])
+
+    def test_the_boundary_still_carries_the_reading(self):
+        """Half of a storage answer is this house's own: the temperature."""
+        reply = food.answer("where do I keep the mango", self.fridge())
+        self.assertIn("3 °C", reply)
+        self.assertIn("-18", reply)
 
     def test_the_longest_key_wins(self):
         """ "Ice cream" contains "cream", and cream belongs to milk."""

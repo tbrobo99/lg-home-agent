@@ -529,6 +529,19 @@ def names_a_device(text: str, devices: list[dict]) -> bool:
                for p in _alias_patterns(d.get("type", "")))
 
 
+def _names_other_device(text: str, devices: list[dict]) -> bool:
+    """The same question with the refrigerator taken out.
+
+    "put the beer in the fridge" is a question about the fridge; "keep the washer
+    on" is a command about the washer. Only the first is food storage, and the
+    fridge is the appliance a storage question is allowed to name.
+    """
+    t = (text or "").lower()
+    return any(p.search(t) for d in devices
+               if d.get("type") != "refrigerator"
+               for p in _alias_patterns(d.get("type", "")))
+
+
 # ---------------------------------------------------------------- typo repair
 #
 # Typing on a phone produces "bedrom", "purifire", "evry nite". The rules are
@@ -716,6 +729,18 @@ def parse(text: str, devices: list[dict], now: datetime | None = None,
         fridge = next((d for d in devices if d.get("type") == "refrigerator"
                        and d.get("online", True)), None)
         res.update(intent="food", confidence=0.9, food=True)
+        set_targets(res, [fridge] if fridge else [])
+        return res
+
+    # 3b. A storage question about something the table has never heard of —
+    # "where do I keep the mango". It used to reach the generic help text, which
+    # answers the wrong question: the house can give the reading, and the rest is
+    # a boundary of the table rather than a failure to understand. Guarded on the
+    # other appliances so "keep the washer on" stays a control command.
+    if food.is_unknown_storage(t) and not _names_other_device(t, devices):
+        fridge = next((d for d in devices if d.get("type") == "refrigerator"
+                       and d.get("online", True)), None)
+        res.update(intent="food", confidence=0.75, food=True)
         set_targets(res, [fridge] if fridge else [])
         return res
 

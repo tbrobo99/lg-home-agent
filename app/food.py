@@ -137,6 +137,28 @@ ADEQUACY_RE = re.compile(
 # The appliance itself, for the question that names no ingredient at all.
 FRIDGE_RE = re.compile(r"\b(?:fridge|refrigerator|freezer|compartment)\b", re.I)
 
+# A question about where something goes, when the something is not in the table.
+#
+# Not "contains a storage verb": "the bedroom is freezing" contains one, and so
+# does "keep the bedroom cool", and both are about the room. The verb has to sit
+# in a construction that asks where something goes — a "where do I keep" clause,
+# a "how long does it keep", a "can I freeze it", or a verb with the appliance
+# named as the destination. That is the shape of the question, and the shape is
+# all there is to go on when the food itself is a word the table does not know.
+UNKNOWN_STORAGE_RE = re.compile(
+    r"\bwhere\s+(?:do|should|can|would|shall)\s+(?:i|we)\s+"
+    r"(?:keep|store|put|place)\b"
+    r"|\bhow\s+long\s+(?:does|do|can|will|would)\b.{0,24}?\bkeep\b"
+    r"|\b(?:can|could|should)\s+(?:i|we)\s+(?:freeze|refrigerate)\b"
+    r"|\b(?:put|place|store|keep|leave)\b.{0,24}?\bin\s+the\s+"
+    r"(?:fridge|freezer|refrigerator)\b", re.I)
+
+# What the table covers, in the order a person would list it. Hand-written
+# because it is read by a person, and pinned by a test against FOOD_TABLE so it
+# cannot quietly drift when an entry is added.
+COVERS = ["chicken", "meat", "fish", "milk", "eggs", "rice", "leftovers",
+          "butter", "cheese", "vegetables", "fruit", "ice cream"]
+
 
 def match_food(text: str) -> dict | None:
     """Return the entry whose trigger word best matches, longest word first.
@@ -165,6 +187,21 @@ def wants_storage(text: str) -> bool:
 
 def wants_adequacy(text: str) -> bool:
     return bool(ADEQUACY_RE.search(text or ""))
+
+
+def is_unknown_storage(text: str) -> bool:
+    """A storage question about something the table has never heard of.
+
+    "Where do I keep the mango" used to reach the generic help text — *"I can
+    turn devices on and off"* — which is the wrong answer twice: the house can
+    answer half of it, and the other half is not a failure to understand but a
+    boundary of the table. Naming that boundary is more useful than a shrug, and
+    it is the only honest option once the alternative is a model inventing a
+    number of days.
+    """
+    if not text or match_food(text) is not None:
+        return False
+    return bool(UNKNOWN_STORAGE_RE.search(text))
 
 
 def is_fridge_adequacy(text: str) -> bool:
@@ -321,6 +358,19 @@ def _reading(name: str, fresh: int | None, frozen: int | None) -> str:
     return f"{name}: {fresh} °C"
 
 
+def _unknown_reply(name: str, fresh, frozen) -> str:
+    """The honest floor: no rule, here is what there is, and here is the reading.
+
+    The reading is still worth giving. It is the half of a storage answer that
+    this house owns, and it is true whether or not the table has heard of the
+    food.
+    """
+    lines = [_reading(name, fresh, frozen)] if name and fresh is not None else []
+    lines.append("I do not have a storage rule for that one.")
+    lines.append(f"The table covers {', '.join(COVERS[:-1])} and {COVERS[-1]}.")
+    return "\n".join(lines)
+
+
 def _appliance_answer(text: str, name: str, fresh, frozen, note: bool) -> str:
     """No ingredient named: judge the appliance against the usual range."""
     freezer = bool(re.search(r"\bfreezer\b", text or "", re.I))
@@ -360,12 +410,14 @@ def answer(text: str, fridge: dict | None, note: bool = True) -> str:
     if food is None:
         # "is the fridge cold enough" — nothing to look up, so the answer is the
         # reading and the range it is being judged against.
-        if not is_fridge_adequacy(text):
-            return ""
-        if not name or fresh_temp is None:
-            return ("This house has no refrigerator I can read, so I cannot "
-                    "say whether it is cold enough.")
-        return _appliance_answer(text, name, fresh_temp, frozen_temp, note)
+        if is_fridge_adequacy(text):
+            if not name or fresh_temp is None:
+                return ("This house has no refrigerator I can read, so I cannot "
+                        "say whether it is cold enough.")
+            return _appliance_answer(text, name, fresh_temp, frozen_temp, note)
+        if is_unknown_storage(text):
+            return _unknown_reply(name, fresh_temp, frozen_temp)
+        return ""
 
     lines: list[str] = []
     if name and fresh_temp is not None:

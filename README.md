@@ -469,7 +469,7 @@ lg-home-conversational-agent/
 │       ├── app.js          state + rendering
 │       ├── manifest.webmanifest
 │       └── sw.js           service worker
-├── tests/                  192 unit tests, stdlib only
+├── tests/                  198 unit tests, stdlib only
 │   ├── fake_llm.py         scripted OpenAI-compatible server (offline CI)
 │   ├── test_scenes.py      routines, and the fridge that no scene may switch off
 │   └── test_agent_loop.py  tier routing + every loop guardrail
@@ -620,8 +620,11 @@ stalls — the worst case is the rules answering alone.
     for raw poultry, and nothing in a generated sentence can be checked by the person
     reading it. What makes the answer worth having is the other half: the temperature is
     read from the appliance, and that number no model can produce. Anything not in the
-    table falls through to the layers below and gets the generic reply, which is honest
-    about the boundary but is a boundary.
+    table is answered as a boundary rather than a guess: *"I do not have a storage rule
+    for that one"*, the twelve categories named, and the reading still given, because
+    half of a storage answer is this house's own. The limit is the limit — a bare
+    unknown word (*"mango"* on its own) cannot be recognised as food at all, and reaches
+    the generic reply.
 
 Three earlier limitations are closed and are now tests: a compound sentence is no longer
 half-answered (`_clauses_disagree`), the loop no longer reports work it did not do, and
@@ -659,7 +662,7 @@ half-answered (`_clauses_disagree`), the loop no longer reports work it did not 
 
 ### Unit tests
 
-192 tests, standard library only — no pytest, no fixtures, no network:
+198 tests, standard library only — no pytest, no fixtures, no network:
 
 ```bash
 python -m unittest discover -s tests -v
