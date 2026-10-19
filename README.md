@@ -728,49 +728,24 @@ For recording a demo, see [docs/DEMO.md](docs/DEMO.md).
 
 ## 13. Related work
 
-**ALIVE** (Hanyang University, 2024 — [SWE-ALIVE](https://github.com/SWE-ALIVE)) is the
-closest project in spirit, and it is worth saying what it does better than this one.
+Two lines of work meet here, and this project sits between them.
 
-ALIVE's core contribution is **IC-DST**: In-Context Dialogue State Tracking, where the
-model is handed a handful of retrieved similar dialogues and infers the user's intent from
-them, rather than from hand-written rules. It also splits the conversation per device
-(a chat room per appliance) and supports touching several devices in one turn. On
-*"what does the user mean by this odd sentence"*, that approach is genuinely more
-flexible than a rule engine, and it is the honest answer to why anyone would use an LLM
-here at all.
+**Tool-using agents.** ReAct interleaves reasoning with tool calls, and Toolformer shows
+a model can learn when to call one at all. The fourth tier of this project is that
+structure with a step budget and a deadline, and with every argument validated before
+it reaches a device.
 
-The difference is what each project treats as the hard problem:
-
-| | ALIVE | This project |
-|---|---|---|
-| Core question | *How do I understand the sentence?* | *Will the action actually happen?* |
-| Intent | IC-DST, retrieval-augmented, LLM-driven | rules first, LLM only for the long tail |
-| Scheduling | none | durable jobs in SQLite, 1 Hz thread |
-| Process restart | dialogue state is in the session | state on disk, missed runs reported |
-| Evaluation | none reported in their write-up | 65-case fixed-clock dataset in CI, 100% |
-| Device layer | simulated | simulator; a ThinQ Open API adapter is written but untested |
-
-Read the table as a division of labour, not a scoreboard. IC-DST answers a question this
-project answers with regexes and accepts the cost: an LLM call on every turn, no offline
-mode, and a failure mode where the model confidently misreads a time. That trade is
-reasonable when the interesting problem is language. It is not reasonable when the
-interesting problem is *"did the AC turn off at 23:00, and do I have proof?"* — which is
-the question this project is built around.
-
-Where ALIVE is ahead, plainly: intent coverage on unusual phrasing, and a per-device
-conversation model that scales better than one global thread as the device count grows.
-The first is on the roadmap above. The second is not — splitting one conversation per
-appliance would be a redesign of how turns are stored, not an increment.
-
-Two notes on the table above, because both are easy to get wrong. ALIVE's write-up
-reports no accuracy, latency or test figures at all — the 38-page document discusses
-the *quality of its generated dataset*, which is a different thing, so "not reported"
-is a fact about their document rather than a claim about their system. And IC-DST
-itself is not theirs: it is Hudeček and Dušek, *In-Context Learning for Dialogue
-State Tracking*, ACL 2023. Cite that paper, not a coursework project, when the
-question is the method.
+**Dialogue state tracking.** Retrieval-augmented state tracking (Hudeček and Dušek,
+*In-Context Learning for Dialogue State Tracking*, ACL 2023) infers intent from similar
+retrieved dialogues rather than from rules. On unusual phrasing that is more flexible
+than anything a regex can do, and it is the honest answer to why a model belongs in
+this pipeline at all. It also puts a model call on every turn and keeps dialogue state
+in the session. This project takes the opposite trade, because the question it is built
+around is not *"what did the user mean"* but *"did the action happen, and what proves
+it"*.
 
 ---
+
 
 ## 14. License
 
