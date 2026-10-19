@@ -7,69 +7,98 @@ the one place this project can say something a chatbot cannot.
 
 The guidance below is ordinary food-safety advice, not a standard. It is worded
 as ranges for that reason, and the reply says where it comes from.
+
+Every phrase in the table is written to survive being dropped into a sentence
+with *any* subject, singular or plural: no "it", no "they". The first draft had
+"they freeze well" for fruit, and "apple" — which is in the table as *most
+fruit* — came back as "Apple … freezer: they freeze well". A table of phrases
+that only read correctly under the label they were written for is a table that
+produces ungrammatical answers the moment the label is replaced by the word the
+user typed, and the label is replaced on purpose.
 """
 from __future__ import annotations
 
 import re
 
-# word in the sentence -> label, fresh compartment, freezer
+# keys -> what to call it, how long it keeps in the fridge, how long in the
+# freezer, and an optional aside that qualifies the first number.
 FOOD_TABLE: list[dict] = [
     {"keys": ["chicken", "hen", "poultry"],
      "label": "raw chicken",
-     "fresh": "one to two days",
+     "keeps": "one to two days",
      "frozen": "several months"},
     {"keys": ["beef", "pork", "lamb", "meat", "mince", "minced beef",
-              "ground beef", "sausage", "bacon"],
+              "ground beef"],
      "label": "raw meat",
-     "fresh": "one to two days",
+     "keeps": "one to two days",
      "frozen": "several months"},
+    # Cured meat was in the raw-meat entry, which told anyone asking about bacon
+    # that it keeps one to two days. It keeps for weeks; the date on the packet
+    # is the number that matters.
+    {"keys": ["bacon", "sausage", "sausages", "ham", "salami", "chorizo"],
+     "label": "cured meat",
+     "keeps": "a week or two once opened",
+     "aside": "the printed date decides",
+     "frozen": "freezes, though it does not need to"},
     {"keys": ["fish", "salmon", "tuna", "cod", "prawn", "prawns", "shrimp",
               "seafood", "crab"],
      "label": "raw fish",
-     "fresh": "about a day",
+     "keeps": "about a day",
      "frozen": "several months"},
     {"keys": ["milk", "cream"],
      "label": "milk",
-     "fresh": "a few days, and the printed date decides",
-     "frozen": "it can be frozen but separates when thawed"},
+     "keeps": "a few days",
+     "aside": "the printed date decides",
+     "frozen": "can be frozen but separates when thawed"},
     {"keys": ["egg", "eggs"],
      "label": "eggs",
-     "fresh": "three to five weeks",
-     "frozen": "not in the shell"},
+     "keeps": "three to five weeks",
+     "frozen": "only out of the shell"},
     {"keys": ["cooked rice", "leftover rice", "boiled rice", "rice"],
      "label": "cooked rice",
-     "fresh": "about a day, so it is the one to be careful with",
-     "frozen": "a month or more"},
+     "keeps": "about a day",
+     "aside": "reheat only once",
+     "frozen": "a month or more",
+     # The label narrows a word the user did not narrow. Saying so is the
+     # difference between answering a question and answering a neighbouring one.
+     "if_matched": {"rice": "Dry rice belongs in the cupboard, not the fridge."}},
     {"keys": ["leftovers", "leftover", "takeaway", "takeout"],
      "label": "leftovers",
-     "fresh": "one to two days",
+     "keeps": "one to two days",
      "frozen": "a month or more"},
     {"keys": ["butter"],
      "label": "butter",
-     "fresh": "a few weeks once opened",
-     "frozen": "it freezes well"},
+     "keeps": "a few weeks once opened",
+     "frozen": "freezes well"},
     {"keys": ["cheese"],
      "label": "cheese",
-     "fresh": "a few weeks once opened, and a hard cheese keeps longer",
-     "frozen": "it can be frozen, but it crumbles when thawed"},
+     "keeps": "a few weeks once opened",
+     "aside": "a hard cheese keeps longer",
+     "frozen": "can be frozen, but crumbles when thawed"},
     {"keys": ["vegetable", "vegetables", "veggies", "lettuce", "spinach",
               "carrot", "carrots", "broccoli", "cabbage", "cucumber", "salad",
               "greens", "herb", "herbs", "mushroom", "mushrooms", "onion",
               "onions", "potato", "potatoes"],
      "label": "most vegetables",
-     "fresh": "three to seven days, and they keep better away from the coldest "
-              "part of the compartment",
-     "frozen": "they need blanching first"},
+     "keeps": "three to seven days",
+     "aside": "best kept away from the coldest part of the compartment",
+     "frozen": "blanch first"},
     {"keys": ["fruit", "fruits", "berries", "strawberry", "strawberries",
               "banana", "bananas", "apple", "apples", "orange", "oranges",
               "grape", "grapes"],
      "label": "most fruit",
-     "fresh": "three to seven days",
-     "frozen": "they freeze well"},
+     "keeps": "three to seven days",
+     "frozen": "good frozen too"},
+    # No duration, so this entry is a sentence rather than a phrase: there is no
+    # number of days it keeps in a fridge, because it is not supposed to be in
+    # one. The first draft gave it "keeps": "it does not belong there", and the
+    # adequacy path produced "Ice cream keeps it does not belong there, so 3 °C
+    # is cold enough for that."
     {"keys": ["ice cream", "icecream"],
      "label": "ice cream",
-     "fresh": "it does not belong there",
-     "frozen": "that is what it is for"},
+     "keeps": None,
+     "fresh": "does not belong in the fridge at all",
+     "frozen": "the freezer is the only place for it"},
 ]
 
 # "put the chicken in the fridge" — a place is named, so the answer compares them.
@@ -85,6 +114,9 @@ ADEQUACY_RE = re.compile(
     r"\b(?:enough|adequate|okay|ok|safe|good|alright)\b"
     r"|\btoo\s+(?:warm|hot|cold)\b"
     r"|\bis\s+it\s+(?:cold|warm|fine)\b", re.I)
+
+# The appliance itself, for the question that names no ingredient at all.
+FRIDGE_RE = re.compile(r"\b(?:fridge|refrigerator|freezer|compartment)\b", re.I)
 
 
 def match_food(text: str) -> dict | None:
@@ -116,6 +148,31 @@ def wants_adequacy(text: str) -> bool:
     return bool(ADEQUACY_RE.search(text or ""))
 
 
+def is_fridge_adequacy(text: str) -> bool:
+    """ "is the fridge cold enough" — a judgement about the appliance itself.
+
+    No ingredient is named, so there is no rule to quote; the whole answer is
+    the reading and whether it is in range. This used to fall out of the food
+    module entirely and land on the generic help text, which is the wrong answer
+    to a question this house can answer exactly.
+
+    "No ingredient" is the test, not "no storage word". "freezer" is a storage
+    word, so excluding storage questions outright dropped "is the freezer cold
+    enough" — which is the same question about the other compartment.
+    """
+    if not wants_adequacy(text) or not FRIDGE_RE.search(text or ""):
+        return False
+    if match_food(text) is not None:
+        return False
+    # A question, not a complaint. "the fridge is too warm" is a statement about
+    # a fault — the answer to it is to make the fridge colder, not to read the
+    # number back — and it belongs to the layers that can act. "is the fridge
+    # cold enough" is a question, and the reading is the whole answer.
+    t = (text or "").strip()
+    return bool(t.endswith("?") or re.match(r"(?:is|are|does|do|should|can|"
+                                             r"how)\b", t, re.I))
+
+
 # Words that can sit around an ingredient without making the sentence about
 # something else: "chicken", "the chicken", "and chicken?".
 _FILLER = frozenset("""a an the some this that it and or for me my about what
@@ -139,7 +196,7 @@ def is_food_request(text: str) -> bool:
         return False
     entry = match_food(text)
     if entry is None:
-        return False
+        return is_fridge_adequacy(text)
     if wants_storage(text) or wants_adequacy(text):
         return True
     # Count what is left after the food itself. Counting words was enough for
@@ -170,7 +227,13 @@ def _subject(food: dict) -> str:
     """
     label, matched = food["label"], food.get("matched") or food["label"]
     qualifier = label.split(" ", 1)[0].lower()
-    subject = label if qualifier in ("raw", "cooked") else matched
+    # An entry with no duration is written as a full sentence, and a sentence
+    # needs the noun phrase rather than whatever spelling the user happened to
+    # type ("icecream").
+    if food.get("keeps") is None:
+        subject = label
+    else:
+        subject = label if qualifier in ("raw", "cooked") else matched
     return subject[:1].upper() + subject[1:]
 
 
@@ -182,6 +245,41 @@ def _verb(subject: str) -> str:
 def _note() -> str:
     """Where the guidance comes from. Short enough to survive being repeated."""
     return "(general guidance, not a reading from the fridge)"
+
+
+def _verdict(temp: int | None, freezer: bool = False) -> str:
+    """A phrase, not a comparison. "so 8 °C is warmer than that likes" had no
+    antecedent for "that" — it was a template talking to itself."""
+    if temp is None:
+        return ""
+    if freezer:
+        return "fine" if temp <= -18 else "not cold enough"
+    if temp <= 4:
+        return "cold enough"
+    if temp <= 7:
+        return "on the warm side"
+    return "too warm"
+
+
+def _reading(name: str, fresh: int | None, frozen: int | None) -> str:
+    if frozen is not None:
+        return f"{name}: {fresh} °C · freezer {frozen} °C"
+    return f"{name}: {fresh} °C"
+
+
+def _appliance_answer(text: str, name: str, fresh, frozen, note: bool) -> str:
+    """No ingredient named: judge the appliance against the usual range."""
+    freezer = bool(re.search(r"\bfreezer\b", text or "", re.I))
+    lines = [_reading(name, fresh, frozen)] if fresh is not None else []
+    if freezer and frozen is not None:
+        lines.append(f"A freezer wants -18 °C or colder, so {frozen} °C is "
+                     f"{_verdict(frozen, freezer=True)}.")
+    elif fresh is not None:
+        lines.append(f"A fridge wants 0-4 °C, so {fresh} °C is "
+                     f"{_verdict(fresh)}.")
+    if note and lines:
+        lines.append(_note())
+    return "\n".join(lines)
 
 
 def answer(text: str, fridge: dict | None, note: bool = True) -> str:
@@ -198,51 +296,75 @@ def answer(text: str, fridge: dict | None, note: bool = True) -> str:
     numbers from the house are missing, and the reply says so instead of
     inventing a temperature.
     """
-    food = match_food(text)
-    if food is None:
-        return ""
-
     name, fresh_temp, frozen_temp = "", None, None
     if fridge:
         name = fridge.get("name", "the refrigerator")
         fresh_temp = (fridge.get("state") or {}).get("fridge_temp")
         frozen_temp = (fridge.get("state") or {}).get("freezer_temp")
 
+    food = match_food(text)
+    if food is None:
+        # "is the fridge cold enough" — nothing to look up, so the answer is the
+        # reading and the range it is being judged against.
+        if not is_fridge_adequacy(text):
+            return ""
+        if not name or fresh_temp is None:
+            return ("This house has no refrigerator I can read, so I cannot "
+                    "say whether it is cold enough.")
+        return _appliance_answer(text, name, fresh_temp, frozen_temp, note)
+
     lines: list[str] = []
     if name and fresh_temp is not None:
-        if frozen_temp is not None:
-            lines.append(f"{name}: {fresh_temp} °C · freezer {frozen_temp} °C")
-        else:
-            lines.append(f"{name}: {fresh_temp} °C")
+        lines.append(_reading(name, fresh_temp, frozen_temp))
 
     subject = _subject(food)
+    keeps = food.get("keeps")
 
-    if wants_adequacy(text) and not wants_storage(text):
+    if keeps is None:
+        # Entries with no duration are already sentences.
+        lines.append(f"{subject} {food['fresh']} — {food['frozen']}.")
+    elif wants_adequacy(text) and not wants_storage(text):
         # A judgement, not a comparison. If the user named a temperature, judge
         # that one and say what the house is actually at; otherwise judge the
         # reading. Answering the measured number at a question that asked about
         # 4 °C is the same failure as answering a different question entirely.
         m = DEGREES_RE.search(text or "")
         asked = int(m.group(1)) if m else None
-        judge, source = fresh_temp, f"{fresh_temp} °C"
+        judge = fresh_temp
+        source = f"{fresh_temp} °C"
         if asked is not None and 0 <= asked <= 30:
             judge, source = asked, f"{asked} °C"
         elif fresh_temp is None:
             lines.append("This house has no refrigerator I can read, so I can "
                          "only judge the guidance, not your appliance.")
-            lines.append(f"{subject}: {food['fresh']} in a fresh-food compartment.")
+            lines.append(f"{subject}: {food['fresh']} in a fresh-food "
+                         f"compartment.")
             return "\n".join(lines)
-        verdict = ("cold enough for that" if judge is not None and judge <= 4
-                   else "warmer than that likes")
-        lines.append(f"{subject} {_verb(subject)} {food['fresh']}, "
-                     f"so {source} is {verdict}.")
+        sentence = f"{subject} {_verb(subject)} {keeps}"
+        if food.get("aside"):
+            sentence += f" — {food['aside']}"
+        lines.append(f"{sentence}. {source} is {_verdict(judge)}.")
         if asked is not None and fresh_temp is not None and asked != fresh_temp:
             lines.append(f"Right now the compartment is at {fresh_temp} °C.")
         if note:
             lines.append(_note())
         return "\n".join(lines)
+    else:
+        sentence = f"{subject} {_verb(subject)} {keeps}"
+        if food.get("aside"):
+            sentence += f" — {food['aside']}"
+        # The freezer on its own line rather than after a separator. On a phone
+        # the bubble is about forty characters wide, so "… · freezer: a month or
+        # more" broke after the dot and the second line began with a stray "·",
+        # which reads as a bullet that lost its item.
+        lines.append(sentence)
+        lines.append(f"freezer: {food['frozen']}")
 
-    lines.append(f"{subject} — fridge: {food['fresh']} · freezer: {food['frozen']}")
+    # The label narrowed a word the user did not narrow; say which one is meant.
+    narrowed = (food.get("if_matched") or {}).get(food.get("matched") or "")
+    if narrowed:
+        lines.append(narrowed)
+
     if not name:
         lines.append("I cannot read a refrigerator here, so this is the general "
                      "rule rather than your appliance.")

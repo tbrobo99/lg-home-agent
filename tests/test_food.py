@@ -158,13 +158,78 @@ class ReplyTest(unittest.TestCase):
         answer to a question nobody asked.
         """
         reply = food.answer("apple", self.fridge())
-        self.assertIn("Apple —", reply)
+        self.assertIn("Apple keeps", reply)
         self.assertNotIn("Most fruit", reply)
 
     def test_a_qualifier_in_the_label_is_kept(self):
         """ "Rice" must not be answered as if it were cooked rice."""
-        self.assertIn("Cooked rice —", food.answer("rice", self.fridge()))
-        self.assertIn("Raw chicken —", food.answer("chicken", self.fridge()))
+        self.assertIn("Cooked rice keeps", food.answer("rice", self.fridge()))
+        self.assertIn("Raw chicken keeps", food.answer("chicken", self.fridge()))
+
+    def test_a_narrowed_label_says_which_one_it_means(self):
+        """The table narrowed "rice" to cooked rice; the user did not.
+
+        Answering "Cooked rice keeps about a day" to somebody holding a bag of
+        basmati is answering a neighbouring question, so the reply says which
+        one it is about — and stays quiet when the user was already specific.
+        """
+        bare = food.answer("rice", self.fridge())
+        self.assertIn("Dry rice belongs in the cupboard", bare)
+
+        explicit = food.answer("cooked rice", self.fridge())
+        self.assertNotIn("Dry rice", explicit)
+
+    def test_a_singular_food_does_not_get_a_plural_pronoun(self):
+        """ "Apple … they freeze well" — the label's pronoun, on a singular word.
+
+        Every phrase in the table has to read correctly under any subject,
+        because the subject is replaced by the word the user typed.
+        """
+        for text in ("apple", "spinach", "banana"):
+            reply = food.answer(text, self.fridge())
+            self.assertNotIn(" they ", reply, text)
+            self.assertNotIn(" it ", reply, text)
+
+    def test_an_entry_without_a_duration_is_not_dropped_into_a_duration_sentence(self):
+        """ "Ice cream keeps it does not belong there, so 3 °C is cold enough." """
+        reply = food.answer("is the fridge cold enough for ice cream", self.fridge())
+        self.assertNotIn("keeps it does not belong", reply)
+        self.assertIn("does not belong in the fridge", reply)
+        self.assertIn("the freezer is the only place for it", reply)
+
+    def test_a_verdict_is_a_phrase_not_a_comparison_with_nothing(self):
+        """ "8 °C is warmer than that likes" had no antecedent for "that"."""
+        warm = food.answer("is 8 degrees enough for chicken", self.fridge())
+        self.assertIn("8 °C is too warm", warm)
+        self.assertNotIn("than that likes", warm)
+
+        mild = food.answer("is 5 degrees enough for the milk", self.fridge())
+        self.assertIn("5 °C is on the warm side", mild)
+
+    def test_the_appliance_can_be_judged_with_no_ingredient_named(self):
+        """ "is the fridge cold enough" used to fall through to the help text."""
+        self.assertTrue(food.is_food_request("is the fridge cold enough"))
+        fridge = food.answer("is the fridge cold enough", self.fridge())
+        self.assertIn("0-4 °C", fridge)
+        self.assertIn("3 °C is cold enough", fridge)
+
+        freezer = food.answer("is the freezer cold enough", self.fridge())
+        self.assertIn("-18", freezer)
+
+    def test_a_complaint_about_the_fridge_is_not_a_question_about_its_number(self):
+        """ "the fridge is too warm" wants it colder, not a reading of 3 °C.
+
+        Only the question form is answered here. The statement belongs to the
+        layers that can act on it.
+        """
+        self.assertFalse(food.is_food_request("the fridge is too warm"))
+        self.assertTrue(food.is_food_request("is the fridge too warm?"))
+
+    def test_cured_meat_is_not_raw_meat(self):
+        """Bacon was in the raw-meat entry, which said one to two days."""
+        reply = food.answer("bacon", self.fridge())
+        self.assertIn("a week or two", reply)
+        self.assertNotIn("one to two days", reply)
 
     def test_the_longest_key_wins(self):
         """ "Ice cream" contains "cream", and cream belongs to milk."""
@@ -182,12 +247,18 @@ class ReplyTest(unittest.TestCase):
         self.assertIn("general guidance", first)
         self.assertNotIn("general guidance", second)
 
-    def test_the_answer_is_three_short_lines_not_a_paragraph(self):
+    def test_the_answer_is_short_lines_not_a_paragraph(self):
         """Three ingredients in a row used to be three identical paragraphs."""
-        reply = food.answer("fish", self.fridge())
+        reply = food.answer("fish", self.fridge(), note=False)
         lines = reply.split("\n")
         self.assertEqual(len(lines), 3)
-        self.assertLess(max(len(line) for line in lines), 110)
+        self.assertLess(max(len(line) for line in lines), 60)
+
+    def test_no_line_starts_with_a_stranded_separator(self):
+        """On a phone the bubble wraps, and "· freezer: …" began with a dot."""
+        for text in ("apple", "cheese", "spinach", "rice"):
+            for line in food.answer(text, self.fridge()).split("\n"):
+                self.assertFalse(line.startswith("·"), f"{text}: {line!r}")
 
 
 if __name__ == "__main__":

@@ -70,6 +70,7 @@ Agent  Sorry, I did not catch that.                   ← and refuses to invent
 | **Routines** | `wake the house up` · `put the whole flat to sleep` · `I'm leaving` — and the fridge is never switched off |
 | **A routine at a time** | `put the living room to sleep in 20 minutes` → scheduled, not run now |
 | **Looks before it acts** | `the air in here is disgusting` → runs the purifier at high |
+| **Food storage** | `is the fridge cold enough for vegetables` · `how long can I keep the chicken` · `rice` — a rule from outside, judged against the temperature the fridge reports |
 | **Phone interface** | room tabs, a per-device control sheet, one-tap quick actions; adds to the home screen over HTTPS |
 
 It understands times as people actually say them: `10:30 pm`, `at 7 am tomorrow`,
@@ -468,7 +469,7 @@ lg-home-conversational-agent/
 │       ├── app.js          state + rendering
 │       ├── manifest.webmanifest
 │       └── sw.js           service worker
-├── tests/                  135 unit tests, stdlib only
+├── tests/                  188 unit tests, stdlib only
 │   ├── fake_llm.py         scripted OpenAI-compatible server (offline CI)
 │   ├── test_scenes.py      routines, and the fridge that no scene may switch off
 │   └── test_agent_loop.py  tier routing + every loop guardrail
@@ -648,7 +649,7 @@ half-answered (`_clauses_disagree`), the loop no longer reports work it did not 
 
 ### Unit tests
 
-170 tests, standard library only — no pytest, no fixtures, no network:
+188 tests, standard library only — no pytest, no fixtures, no network:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -667,7 +668,8 @@ test_agent_mode.py  agent mode: the offer in the prompt, accepting it, refusing 
                     and planning something else, the trace, and the lookups that
                     are deliberately never put in front of a model
 test_food.py        storage guidance from the measured temperature, adequacy
-                    questions, and recipes refused
+                    questions, the fridge judged with no ingredient named,
+                    every phrase grammatical under any subject, recipes refused
 ```
 
 The suite uses a temporary database and a temporary simulator state file, so running it
