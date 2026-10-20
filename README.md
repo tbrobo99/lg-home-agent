@@ -249,6 +249,22 @@ not do. When the model cannot finish the turn, the deterministic answer is what
 the user reads — agent mode is not permitted to make the system worse than the
 cascade it sits in front of.
 
+One more, and it was earned the same way. **A declined reading may be different
+from the plan; it may not be less than it.** *"The bedroom is cold"* is read as
+power on, heat, 24 °C. Measured three runs out of three, the model declined that
+reading and sent the temperature alone — leaving the air conditioner *cooling* a
+room the user had just called cold, and reporting it as "set to 24 °C". A subset
+of the plan is never a correction of it; it is an omission wearing one. So a
+strict subset is refused and the turn falls back to the rules, which is the same
+floor a model that could not finish already gets.
+
+Only a *strict* subset is caught, because the two honest disagreements are not
+subsets at all: *"switch it off instead"* is a different action, and a cold room
+does not need its air conditioner running, so that answer is left alone. So is
+deciding the room needs drying rather than cooling. The guard fires on exactly
+one thing — dropping the action that carries the meaning and keeping the one
+that does not.
+
 Both modes are switchable at runtime (`POST /api/mode`, or the toggle at the
 top of the Assistant tab), and a reply in agent mode carries the steps behind
 it rather than asserting that steps happened. A declined offer is the first
@@ -682,7 +698,7 @@ falls through every layer to the generic help text.
 
 ### Unit tests
 
-206 tests, standard library only — no pytest, no fixtures, no network:
+209 tests, standard library only — no pytest, no fixtures, no network:
 
 ```bash
 python -m unittest discover -s tests -v

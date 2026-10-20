@@ -267,7 +267,65 @@ class FallbackTests(AgentModeTestBase):
         self.assertNotEqual(result["tier"], "agent")
 
 
-class TraceTests(AgentModeTestBase):
+class DecliningInPartTests(AgentModeTestBase):
+    """A declined reading may be different. It may not be less.
+
+    Measured against `glm-4-flash`, three runs out of three: "the bedroom is
+    cold" is read as power on, heat, 24 °C; the model declined the reading and
+    sent the temperature alone, which left the air conditioner *cooling* a room
+    the user had just called cold — and reported it as "set to 24 °C".
+    """
+
+    def test_dropping_the_part_that_carries_the_meaning_falls_back(self):
+        self.fake.script = [
+            tool_call("control", device_id="ac_bedroom",
+                      actions=[{"action": "temperature", "value": 24}]),
+            tool_call("finish", reply="The bedroom AC is now set to 24\u00b0C."),
+        ]
+        result = self.ask("the bedroom is cold")
+
+        # the rules answer instead, and they say which way the heat goes
+        self.assertEqual(result["tier"], "rules")
+        state = self.adapter.get_state("ac_bedroom")
+        self.assertEqual(state["mode"], "heat")
+        self.assertTrue(state["power"])
+        self.assertIn("heating", result["reply"].lower())
+
+    def test_switching_it_off_instead_is_a_disagreement_not_an_omission(self):
+        """A cold room does not need its air conditioner running, so turning it
+        off is a good answer. It is a different action, not less of the same
+        one, and the guard must not touch it."""
+        self.adapter.apply("ac_bedroom", [{"action": "power", "value": True},
+                                          {"action": "mode", "value": "cool"}])
+        self.fake.script = [
+            tool_call("control", device_id="ac_bedroom",
+                      actions=[{"action": "power", "value": False}]),
+            tool_call("finish", reply="I switched the Bedroom AC off."),
+        ]
+        result = self.ask("the bedroom is cold")
+
+        self.assertEqual(result["tier"], "agent")
+        self.assertEqual(result["reply"], "I switched the Bedroom AC off.")
+        self.assertFalse(self.adapter.get_state("ac_bedroom")["power"])
+
+    def test_a_different_mode_is_a_judgement_not_an_omission(self):
+        """The rules read "stuffy" as cooling; the model may decide the room
+        needs drying instead. That is a disagreement about what the room needs,
+        which is exactly what agent mode is for — only the omission is caught."""
+        self.fake.script = [
+            tool_call("control", device_id="ac_bedroom",
+                      actions=[{"action": "power", "value": True},
+                               {"action": "mode", "value": "dry"}]),
+            tool_call("finish", reply="The Bedroom AC is drying the air."),
+        ]
+        result = self.ask("the bedroom is stuffy")
+
+        self.assertEqual(result["tier"], "agent")
+        self.assertEqual(result["reply"], "The Bedroom AC is drying the air.")
+        self.assertEqual(self.adapter.get_state("ac_bedroom")["mode"], "dry")
+
+
+
     def test_a_failed_step_stays_in_the_trace(self):
         """Recovering from itself is the loop's whole advantage; show it."""
         self.fake.script = [

@@ -441,8 +441,59 @@ class Agent:
             # which devices were touched, which the parse knows better.
             return {**out, "targets": self._targets(intent)}
 
-        return agent_loop.run(self.cfg, text, self.adapter, now, default_room,
+        loop = agent_loop.run(self.cfg, text, self.adapter, now, default_room,
                               offer=offer, adopt=carry_out if offer else None)
+
+        # A declined reading may be different from the plan. It may not be
+        # *less* than it — see `_declined_in_part`. When it is, the turn is
+        # handed back to the rules, which is the same fallback a model that
+        # could not finish already gets: the deterministic answer is the floor.
+        if loop.get("handled") and self._declined_in_part(loop, offer, intent):
+            db.log("agent", "declined a complete reading and did less of it: "
+                            f"{loop.get('actions')} instead of {intent.get('actions')}")
+            return {"handled": False, "declined_in_part": True}
+        return loop
+
+    @staticmethod
+    def _action_set(actions: list[dict]) -> set[tuple[str, str]]:
+        """Actions as a comparable set, with the values the layers spell
+        differently flattened: `True` and `"on"` are the same command."""
+        out: set[tuple[str, str]] = set()
+        for a in actions or []:
+            v = a.get("value")
+            if isinstance(v, bool):
+                v = "on" if v else "off"
+            elif isinstance(v, float) and v.is_integer():
+                v = int(v)
+            out.add((str(a.get("action")), str(v).strip().lower()))
+        return out
+
+    def _declined_in_part(self, loop: dict, offer: dict | None,
+                          intent: dict) -> bool:
+        """Did the model do *less* than the reading it declined?
+
+        Measured: "the bedroom is cold" is read as power on, heat, 24 °C. The
+        model declined that reading and sent the temperature alone — three runs
+        out of three — which left the air conditioner **cooling** a room the
+        user had just called cold, and reported it as "set to 24 °C". A subset of
+        the plan is never a correction of it; it is an omission wearing one.
+
+        Only a *strict* subset counts, because "switch it off instead" is a
+        different action rather than less of the same one, and it is a perfectly
+        good answer to a cold room. So is drying instead of cooling. Both are
+        left alone; only dropping the part that carries the meaning is caught.
+        """
+        if not offer or not offer.get("sure") or loop.get("adopted"):
+            return False
+        wanted = self._action_set(intent.get("actions"))
+        if not wanted:
+            return False
+        for target in self._targets(intent):
+            did = self._action_set([a for a in loop.get("actions") or []
+                                    if a.get("device_id") == target["id"]])
+            if did and did < wanted:
+                return True
+        return False
 
     def _resume_loop(self, text: str, devices: list[dict], default_room: str,
                      fallback: dict | None, now: datetime) -> list[dict] | None:
