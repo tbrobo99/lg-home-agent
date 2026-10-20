@@ -698,7 +698,7 @@ falls through every layer to the generic help text.
 
 ### Unit tests
 
-209 tests, standard library only — no pytest, no fixtures, no network:
+211 tests, standard library only — no pytest, no fixtures, no network:
 
 ```bash
 python -m unittest discover -s tests -v

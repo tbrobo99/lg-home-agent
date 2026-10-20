@@ -481,6 +481,25 @@ class TypoToleranceTest(AgentTestBase):
         self.assertEqual(r["tier"], "rules")
         self.assertFalse(self.adapter.get_state("purifier")["power"])
 
+    def test_a_room_split_in_two_is_still_the_room(self):
+        """Seen live: "the bed room is too hot" asked "Which room?" for a
+        sentence that had already said which room. The phone keyboard wrote the
+        room as two words, and the only thing between the parser and the answer
+        was a space."""
+        r = self.agent.handle("the bed room is too hot")
+
+        self.assertEqual(r["intent_name"], "control")
+        self.assertEqual(self.adapter.get_state("ac_bedroom")["mode"], "cool")
+
+    def test_two_words_that_only_look_like_a_room_are_not_one(self):
+        """Joining words is only safe because the room name has to survive as a
+        contiguous run: "put the bed in the room" is not "bedroom"."""
+        r = self.agent.handle("put the bed in the room")
+
+        self.assertNotEqual(r["intent_name"], "control")
+        self.assertFalse(self.adapter.get_state("ac_bedroom")["power"])
+        self.assertFalse(self.adapter.get_state("ac_living")["power"])
+
     def test_correct_sentences_are_left_exactly_as_typed(self):
         from app import nlu
 

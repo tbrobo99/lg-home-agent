@@ -641,6 +641,19 @@ def resolve_targets(text: str, devices: list[dict], default_room: str = "",
                  if any(p.search(t) for p in _alias_patterns(d.get("type", "")))]
     room_hits = [d for d in devices
                  if (d.get("room") or "").lower() and (d.get("room") or "").lower() in t]
+    if not room_hits:
+        # "the bed room is too hot" is how a phone keyboard writes "bedroom",
+        # and the room was named — the only thing between the parser and the
+        # answer was one space. Seen live: it asked "Which room?" for a sentence
+        # that had already said which room.
+        #
+        # Compared without spaces, a room name cannot bridge two unrelated
+        # words: "put the bed in the room" squeezes to "putthebedintheroom",
+        # which does not contain "bedroom".
+        squeezed = t.replace(" ", "")
+        room_hits = [d for d in devices
+                     if (d.get("room") or "").lower()
+                     and (d.get("room") or "").lower().replace(" ", "") in squeezed]
 
     if GROUP_RE.search(t):
         if type_hits and room_hits:
