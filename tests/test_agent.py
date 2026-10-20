@@ -365,6 +365,48 @@ class ComfortDialogueTest(AgentTestBase):
         self.assertTrue(self.adapter.get_state("ac_bedroom")["power"])
         self.assertEqual(self.adapter.get_state("ac_bedroom")["mode"], "cool")
 
+    def test_a_room_named_as_a_sauna_is_cooled(self):
+        """The sentence this project's own pitch uses as its example. It is a
+        comparison, not a feeling, and none of the feeling words are in it —
+        so it fell through all three tiers to the generic help text, which
+        reads as "I did not understand"."""
+        r = self.agent.handle("the bedroom is a sauna")
+
+        self.assertEqual(r["intent_name"], "control")
+        state = self.adapter.get_state("ac_bedroom")
+        self.assertTrue(state["power"])
+        self.assertEqual(state["mode"], "cool")
+        self.assertEqual(state["target_temp"], 24)
+
+    def test_an_oven_you_cook_in_is_not_a_room_that_is_hot(self):
+        """The "is/like a" prefix is what keeps cooking out. An oven you cook in
+        is "in the oven"; were the bare noun enough, every cooking sentence would
+        try to cool the room it was spoken in."""
+        r = self.agent.handle("put the chicken in the oven at 7 pm")
+
+        self.assertNotEqual(r["intent_name"], "control")
+        self.assertFalse(self.adapter.get_state("ac_living")["power"])
+
+    def test_a_room_with_no_air_conditioner_is_not_the_fridge(self):
+        """Resolved by room alone, a complaint about the kitchen landed on the
+        Kitchen Fridge — the only appliance in that room — and the command layer
+        refused `mode`, which reads as a broken assistant and is the last
+        guardrail before a refrigerator is asked to hold 24 °C."""
+        r = self.agent.handle("it's stuffy in the kitchen")
+
+        self.assertEqual(r["intent_name"], "control")
+        self.assertIn("no air conditioner", r["reply"])
+        self.assertEqual(self.adapter.get_state("fridge")["fridge_temp"], 3)
+
+    def test_the_comparison_does_not_reach_the_purifier(self):
+        """A hot room is a cooling job, not an air-quality one — the two rules
+        share the word "air" in conversation but not in intent."""
+        r = self.agent.handle("the kitchen is an oven")
+
+        self.assertEqual(r["intent_name"], "control")
+        self.assertNotIn("purifier", r["reply"].lower())
+        self.assertFalse(self.adapter.get_state("purifier")["power"])
+
 
 class Tier2ClarifyTest(AgentTestBase):
     def test_successful_plan_does_not_carry_the_rule_fallback(self):

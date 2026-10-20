@@ -125,11 +125,14 @@ class OfferTests(AgentModeTestBase):
     def test_there_is_no_adopt_tool_when_the_rules_had_no_reading(self):
         """A tool that can only answer "nothing to adopt" is a trap.
 
-        Reaching for it and getting an error back is how "the bedroom is a
-        sauna" fell all the way through to the rules' generic help.
+        Reaching for it and getting an error back is how a sentence with no
+        reading falls all the way through to the rules' generic help. The
+        comparison that used to stand here — "the bedroom is a sauna" — is now
+        parsed by the rules themselves, so the trap needs a sentence that still
+        has none.
         """
         self.fake.script = [tool_call("finish", reply="Done.")]
-        self.ask("the bedroom is a sauna")
+        self.ask("the bedroom is unbearable")
 
         names = [t["function"]["name"] for t in self.fake.requests[0]["tools"]]
         self.assertNotIn("adopt_parse", names)

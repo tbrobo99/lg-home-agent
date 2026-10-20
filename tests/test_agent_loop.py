@@ -608,6 +608,79 @@ class ProseBeforeActingTests(LoopTestBase):
 
         self.assertFalse(result["handled"])
 
+    def test_a_house_already_in_the_state_asked_for_is_finished(self):
+        """Live: "the bedroom is a sauna" reached the loop, the model read the
+        bedroom AC, found it already cooling at 24 °C, wrote exactly that, was
+        nudged, wrote it again — and the turn was thrown away. The user got the
+        generic help text, which reads as "I did not understand", for the one
+        sentence the request was about.
+
+        The guardrail this test sits next to is not weakened: the model has to
+        say it through `finish`, so the reply is still a tool result rather than
+        something the loop happened to overhear."""
+        self.fake.script = [
+            tool_call("get_state", device_id="ac_bedroom"),
+            prose("The bedroom air conditioner is already on and set to cool."),
+            tool_call("finish",
+                      reply="The Bedroom AC is already cooling at 24 \u00b0C."),
+        ]
+        result = self.run_loop("the bedroom is a sauna")
+
+        self.assertTrue(result["handled"], result)
+        self.assertEqual(result["reply"],
+                         "The Bedroom AC is already cooling at 24 \u00b0C.")
+        # reading is not changing: the model had nothing to report as work, so
+        # it must not have manufactured some
+        self.assertFalse(self.state("ac_bedroom")["power"])
+
+    def test_the_nudge_is_owed_again_after_the_model_has_done_work(self):
+        """A nudge is spent on a stretch of prose, not on the whole turn.
+
+        Measured: the loop nudged at step 1, the model then went and read two
+        devices, and answered in prose at step 4 with what it had just read —
+        with the budget gone, the turn was thrown away for reporting after
+        working. Doing something earns the nudge back; talking does not.
+        """
+        self.fake.script = [
+            prose("I will check the bedroom first."),
+            tool_call("get_state", device_id="ac_bedroom"),
+            prose("The Bedroom AC is already cooling at 24 \u00b0C."),
+            tool_call("finish",
+                      reply="The Bedroom AC is already cooling at 24 \u00b0C."),
+        ]
+        result = self.run_loop("the bedroom is a sauna")
+
+        self.assertTrue(result["handled"], result)
+        self.assertEqual(result["reply"],
+                         "The Bedroom AC is already cooling at 24 \u00b0C.")
+
+    def test_a_model_that_only_talks_still_gets_one_nudge(self):
+        """The other half: talking never resets the budget, so a turn with no
+        work in it is still refused rather than chatted to."""
+        self.fake.script = [
+            prose("I can help with that."),
+            prose("I can help with that."),
+        ]
+        result = self.run_loop("make it nicer in there")
+
+        self.assertFalse(result["handled"])
+        self.assertEqual(len(self.fake.requests), 2)
+
+    def test_the_already_rule_is_stated_where_the_model_gives_up(self):
+        """Rule 12 is in the system prompt; the nudge repeats it, because that
+        is the moment the model decides there is nothing to do."""
+        self.fake.script = [
+            tool_call("get_state", device_id="ac_bedroom"),
+            prose("The bedroom air conditioner is already on and set to cool."),
+            tool_call("finish", reply="Already cooling at 24 \u00b0C."),
+        ]
+        self.run_loop("the bedroom is a sauna")
+
+        # request 0 reads, request 1 is the prose, request 2 carries the nudge
+        nudge = self.fake.requests[2]["messages"]
+        self.assertTrue(any("already in the state asked for" in str(m.get("content"))
+                            for m in nudge))
+
 
 class SummaryTests(LoopTestBase):
     """The loop's own words, when the model stops without calling `finish`.
@@ -674,8 +747,7 @@ class RoutingTests(LoopTestBase):
 
     def test_a_symptom_skips_the_blind_pass(self):
         self.fake.script = [tool_call("finish", reply="Done.")]
-        result = Agent(self.adapter, self.cfg).handle(
-            "the bedroom is a sauna, sort it out")
+        result = Agent(self.adapter, self.cfg).handle("the bedroom is unbearable")
 
         self.assertEqual(result["tier"], "loop")
         first = self.fake.requests[0]

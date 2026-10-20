@@ -63,3 +63,6 @@
 {"category": "negative", "text": "turn off everything in the living room", "intent": "control", "targets": ["ac_living", "purifier"]}
 {"category": "comfort", "text": "it feels clammy in the bedroom", "intent": "control", "device": "ac_bedroom", "actions": [["power", true], ["mode", "dry"]]}
 {"category": "comfort", "text": "the kitchen smells", "intent": "control", "device": "purifier", "actions": [["power", true], ["fan", "high"]]}
+{"category": "comfort", "text": "the bedroom is a sauna", "intent": "control", "device": "ac_bedroom", "actions": [["power", true], ["mode", "cool"], ["temperature", 24]]}
+{"category": "negative", "text": "the bedroom is a furnace", "intent": "control", "device": "ac_bedroom", "actions": [["power", true], ["mode", "cool"], ["temperature", 24]]}
+{"category": "negative", "text": "put the chicken in the oven at 7 pm", "intent": "food"}

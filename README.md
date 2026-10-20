@@ -39,8 +39,8 @@ Agent  Scheduled — every day at 23:00: turn off the Living Room AC.
        23:00  ⏱ Scheduled task ran · Living Room AC · Success: turn off
 
 You    the bedroom is a sauna, sort it out          ← no device named, no verb
-Agent  The bedroom is 28.6°C, so I switched the Bedroom AC on, set it to
-       cooling at 24°C. Done.
+Agent  Done — Bedroom AC is on.
+       Currently: cooling 24°C, fan auto, room 28.6°C.
 
 You    cool the bedroom down and shut the living room off   ← two requests, one
 Agent  Bedroom AC is cooling at 20°C. Living Room AC is off.   ← sentence, two
@@ -150,14 +150,21 @@ feels. It decides from the request:
 
 - **A literal command** — the user named the value, so the only open question is
   *which* device — gets the cheap single pass; a device list answers that.
-- **A goal** — *"the bedroom is a sauna"* — goes straight to the loop. The right
-  action depends on a temperature no single pass can see, and a plan that guesses
-  it is a guess wearing a JSON schema.
+- **A goal** — *"the bedroom is a sauna"* — is a comparison, and the comfort
+  table answers comparisons: power, cool, 24 °C, on the air conditioner in the
+  room that was named. The rules have read it, so the loop never sees it. What
+  *is* left to the loop is a goal in words the table has never seen —
+  *"the bedroom is unbearable"* — where the action depends on a temperature no
+  rule can look up, and a plan that guesses it is a guess wearing a JSON schema.
 - **The home as a whole** — *"everything off"* — never touches tier 2, which
   could only do one room and report success.
 - **A half-parsed comfort phrase** — *"it's stuffy"* — stays a question. The
   action is already known; only the room is missing, and no tool can read which
   room someone is standing in. Handed to the loop, it switched on the purifier.
+- **A complaint in a room with nothing to fix it** — *"it's stuffy in the
+  kitchen"* — is not patched onto whatever appliance happens to sit there. The
+  kitchen has a fridge and no air conditioner, so the answer names that instead
+  of asking a refrigerator to hold 24 °C.
 
 This ordering is the argument. Put tier 2 first unconditionally and it answers
 everything, plausibly, and the loop becomes dead code that still looks installed —
@@ -212,7 +219,7 @@ Measured on this build, against `glm-4-flash`:
 |---|---|
 | *"turn off the living room AC"* | took the plan — 1 step, 1.0 s |
 | *"the kitchen smells"* | checked the fridge, then took the plan — purifier on |
-| *"the bedroom is a sauna"* | no reading offered, so it read the state and acted — 3 steps |
+| *"the bedroom is a sauna"* | reading offered and adopted — 3 runs out of 3, "Bedroom AC is now on, cooling at 24 °C" |
 | *"cool the bedroom down and shut the living room off"* | overrode the half-plan, sent a bad `mode`, read the error, fixed it |
 
 That last row is the one worth noticing. In the cascade it needed
@@ -594,11 +601,11 @@ stalls — the worst case is the rules answering alone.
 5. **No voice input yet.** Text in, text out.
 6. **No sensors.** Temperature and humidity come from the simulator; the app shell shows
    them, but nothing reads a real sensor yet.
-7. **The tool loop is slow.** 4–14 s per sentence against `glm-4-flash`, on the four
-   sentences that still need it. Sampling is pinned at temperature 0 and those four now
+7. **The tool loop is slow.** 6–12 s per sentence against `glm-4-flash`, on the three
+   sentences that still need it. Sampling is pinned at temperature 0 and those three now
    repeat exactly, run to run; a larger model, or caching the plan for repeated phrasings,
-   is the obvious next step. The four are 3–4 steps each, so the cost is the number of
-   round trips, not the size of the prompt. In agent mode this is no longer four
+   is the obvious next step. They are 3–5 steps each, so the cost is the number of
+   round trips, not the size of the prompt. In agent mode this is no longer three
    sentences — it is every command, which is why the mode is a switch and not a default
    (section 2).
 8. **A setpoint with no value in the sentence is still a guess.** *"The fridge is too warm"*
@@ -625,10 +632,23 @@ stalls — the worst case is the rules answering alone.
     half of a storage answer is this house's own. The limit is the limit — a bare
     unknown word (*"mango"* on its own) cannot be recognised as food at all, and reaches
     the generic reply.
+12. **The comfort table is a table, and so is the list of metaphors.** *Stuffy,
+    muggy, humid, hot, sweaty, boiling, stifling* map to *power, cool, 24 °C*;
+    *clammy, damp, moist, dank* map to *dry*; and a room named as a place that is
+    too hot — *"the bedroom is a sauna"*, *"this room is an oven"* — is caught by
+    the *"is/like a"* in front of the noun, which is what keeps *"put the chicken
+    in the oven at 7 pm"* a cooking sentence. A complaint in words the table has
+    never seen (*"the bedroom is unbearable"*) still goes to the loop, and a
+    complaint in a room with no appliance that can answer it gets told so rather
+    than patched onto whatever is there. Neither is understanding; both are
+    tables, and the honest description of the gap is that a new metaphor is a new
+    row.
 
-Three earlier limitations are closed and are now tests: a compound sentence is no longer
-half-answered (`_clauses_disagree`), the loop no longer reports work it did not do, and
-*"turn off everything"* no longer switches off the fridge (`scenes.KEEP_RUNNING`).
+Four earlier limitations are closed and are now tests: a compound sentence is no longer
+half-answered (`_clauses_disagree`), the loop no longer reports work it did not do,
+*"turn off everything"* no longer switches off the fridge (`scenes.KEEP_RUNNING`), and
+the one sentence this project's own pitch uses — *"the bedroom is a sauna"* — no longer
+falls through every layer to the generic help text.
 
 ---
 
@@ -662,7 +682,7 @@ half-answered (`_clauses_disagree`), the loop no longer reports work it did not 
 
 ### Unit tests
 
-198 tests, standard library only — no pytest, no fixtures, no network:
+206 tests, standard library only — no pytest, no fixtures, no network:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -671,7 +691,9 @@ python -m unittest discover -s tests -v
 ```
 test_nlu.py         device resolution · actions · schedules · queries · compute_next
 test_agent.py       control · multi-device · slot filling · capability checks ·
-                    scheduler execution · crash recovery · routines · smells
+                    scheduler execution · crash recovery · routines · smells ·
+                    comfort phrases, the comparison case, and a room whose only
+                    appliance cannot do what was asked of it
 test_scenes.py      routines per device type, room scoping, the fridge that no
                     routine may switch off
 test_agent_loop.py  tool loop against a scripted model: hallucinated ids, string
@@ -685,6 +707,15 @@ test_food.py        storage guidance from the measured temperature, which
                     fridge judged with no ingredient named, every phrase
                     grammatical under any subject, recipes refused
 ```
+
+Two of them are worth naming, because they are the loop's own honesty and not
+merely its plumbing. `test_a_house_already_in_the_state_asked_for_is_finished`
+pins that a model which reads a device, finds the house already cooling, and
+says so gets to *answer* — the turn used to be thrown away and the user got
+"I did not understand" for the one sentence the request was about. And
+`test_a_model_that_only_talks_still_gets_one_nudge` pins the other side: the
+nudge is spent on a stretch of prose, so a model that only talks is still
+refused rather than chatted to.
 
 The suite uses a temporary database and a temporary simulator state file, so running it
 never touches `data/`. The loop tests drive `tests/fake_llm.py`, a local HTTP server that
@@ -702,32 +733,37 @@ python -m eval.run --min 1.0       # fail unless everything passes
 ```
 
 ```
-Evaluating 65 utterances against the rule engine
+Evaluating 68 utterances against the rule engine
 (no network, no LLM, fixed clock 2026-10-17 18:42)
 
 category          cases   pass     acc
 --------------------------------------
-comfort               5      5    100%
+comfort               6      6    100%
 daily                 3      3    100%
 group_schedule        1      1    100%
 housekeeping          3      3    100%
 immediate            11     11    100%
 mode_fan              5      5    100%
-negative              4      4    100%
+negative              6      6    100%
 once                  8      8    100%
 query                 6      6    100%
 recurring             7      7    100%
 scene                 6      6    100%
 temperature           6      6    100%
 --------------------------------------
-overall              65     65  100.0%
+overall              68     68  100.0%
 ```
+
+Three of those are the comparison case: *"the bedroom is a sauna"* is a
+comfort request, *"the bedroom is a furnace"* is one too, and *"put the chicken
+in the oven at 7 pm"* is not — an oven you cook in is *"in the oven"*, never
+*"is a oven"*, and the prefix is what keeps cooking out of the comfort table.
 
 The clock is fixed so the dataset is deterministic — *"at 7 am tomorrow"* resolves the
 same way on every machine, forever. CI runs this with `--min 0.95` after the unit tests
 and fails the build on regression.
 
-**Be honest about what this measures.** The dataset is 65 utterances I wrote myself,
+**Be honest about what this measures.** The dataset is 68 utterances I wrote myself,
 against a rule engine I wrote. It is a regression guard, not evidence of general language
 understanding — it cannot tell you how the system behaves on the sentence nobody thought
 of. A public benchmark would be stronger evidence; that is the honest next step, and it
@@ -753,19 +789,28 @@ result, not the program's:
 
 | utterance | layer | steps | time | what it did | verdict |
 |---|---|---|---|---|---|
-| the bedroom is a sauna, sort it out | 3 loop | 3 | 8.8s | read state, then `power=True, mode=cool, 24°C` | correct |
-| the whole flat is too warm | 3 loop | 4 | 12.6s | both ACs on at 22°C | correct |
-| the fridge is too warm | 3 loop | 3 | 6.3s | fridge set to 1°C | partial |
-| cool the bedroom down and shut the living room off | 3 loop | 4 | 9.2s | cooled one room, switched off the other | correct |
+| the bedroom is a sauna, sort it out | 1 rules | — | 0.0s | `power=True, mode=cool, 24°C` | correct |
+| the whole flat is too warm | 3 loop | 4 | 12.4s | both ACs on at 22°C | correct |
 | put the whole flat to sleep | 1 scene | — | 0.1s | four devices off, fridge spared | correct |
 | put the living room to sleep in 20 minutes | 1 scene | — | 0.0s | two jobs created, nothing ran now | correct |
+| the air in here is disgusting | 1 rules | — | 0.0s | purifier on, fan high | correct |
 | wake the house up | 1 scene | — | 0.0s | three devices on | correct |
 | get the flat ready for bed | 1 scene | — | 0.0s | four devices off, fridge spared | correct |
+| the fridge is too warm | 3 loop | 3 | 5.8s | fridge set to 3°C | partial |
 | everything off, I'm leaving | 1 scene | — | 0.0s | four devices off, fridge spared | correct |
-| the air in here is disgusting | 1 rules | — | 0.0s | purifier on, fan high | correct |
-| the kitchen smells | 1 rules | — | 0.0s | purifier on, fan high — fridge untouched | correct |
 | it feels clammy in the bedroom | 1 rules | — | 0.0s | `mode=dry` | correct |
 | I'm freezing in the bedroom | 1 rules | — | 0.0s | `power=True, mode=heat, 24°C` | correct |
+| the kitchen smells | 1 rules | — | 0.0s | purifier on, fan high — fridge untouched | correct |
+| the washer has been on for ages | 2 single-shot | — | 3.0s | read the washer, then asked instead of acting | weak |
+| cool the bedroom down and shut the living room off | 3 loop | 5 | 10.9s | cooled one room, switched off the other | correct |
+| keep the bedroom cool every night at 11 pm | 1 rules | — | 0.0s | one job, `mode=cool`, every night at 23:00 | correct |
+
+The first row is the one that changed, and it changed because a table is cheaper
+than a model. *"The bedroom is a sauna"* used to cost 8.8 s and three loop steps
+to reach exactly the answer the comfort table already holds — power, cool, 24 °C
+on the air conditioner in the room that was named. It took one pattern to fix,
+and it is now 0.0 s. The loop's job is not to be the first resort for a sentence
+a table can read; it is to be the only resort for one that no table can.
 | keep the bedroom cool every night at 11 pm | 1 rules | — | 0.0s | `mode=cool`, nightly job | correct |
 | the washer has been on for ages | 2 single-shot | — | 1.9s | reported its state | correct |
 

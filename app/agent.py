@@ -585,7 +585,11 @@ class Agent:
     def _do_control(self, it: dict) -> dict:
         targets = self._targets(it)
         if not targets:
-            return {"reply": "I could not find that device.", "ok": False, "actions": []}
+            # Nothing to command is not always "no such device": the comfort
+            # path reaches here when a room holds no appliance that can move its
+            # air, and it writes what the room does hold.
+            return {"reply": it.get("clarify") or "I could not find that device.",
+                    "ok": False, "actions": []}
 
         # "Everything off" is a figure of speech. A flat action list cannot say
         # "except the fridge", so the exception lives in one table that the scene

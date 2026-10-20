@@ -175,9 +175,15 @@ behind it — tap the little line under the bubble to open them.
 
 ```
 the bedroom is a sauna
-→ get_state      read Bedroom AC — off
+→ offer          the rules' reading: turn on, switch to cooling, set to 24°C — Bedroom AC
+→ control        mode="cooling"     ✗ Mode must be one of cool, heat, dry, fan, auto
 → control        Bedroom AC — turn on, switch to cooling, set to 24°C
 ```
+
+Say out loud what those three lines are: the rules *offered*, the model **declined the
+offer**, sent a `mode` the device does not have, read the refusal back, and fixed it in the
+next step. That is the loop's whole advantage in one screenshot — a plan that cannot be
+wrong about the device, because the device said so.
 
 Then flip back to **Cascade** and ask the same thing. Same outcome, ~1 ms, no steps to
 show, because code picked the layer and never asked the model anything.
@@ -194,7 +200,7 @@ Good sentences to use, in this order:
 | sentence | what to point at |
 |---|---|
 | `turn off the living room AC` | it usually *declines* the offer and calls `control` itself — the offer is not an instruction |
-| `the bedroom is a sauna` | it reads the state first; a cascade cannot do that without the loop |
+| `the bedroom is a sauna` | declines the offer, sends a bad `mode`, reads the error, fixes it — and the cascade answers the same sentence in ~1 ms |
 | `cool the bedroom down and shut the living room off` | two calls in one turn, a different action per room |
 | `how long can I keep the chicken` | answered instantly, no steps — a lookup has nothing to decide |
 

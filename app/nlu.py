@@ -442,6 +442,20 @@ COMFORT_PATTERNS = [
      [{"action": "power", "value": True},
       {"action": "mode", "value": "cool"},
       {"action": "temperature", "value": 24}]),
+    # A room named as a place that is too hot. These are not feelings — they are
+    # comparisons, and the comparison is the whole sentence: "the bedroom is a
+    # sauna" is the example this project's own pitch uses, and it fell through
+    # every tier to the generic help text, which reads as "I did not understand".
+    #
+    # The "is/like a" prefix is what keeps cooking out. An oven you cook in is
+    # "in the oven", never "is a oven", and "put the chicken in the oven at 7"
+    # is a schedule that has to stay a schedule.
+    (re.compile(r"\b(?:is|are|feels?|feel|like|as)\s+(?:a|an)\s+"
+                r"(?:sauna|oven|furnace|kiln|greenhouse|desert)\b"
+                r"|\b(?:sweltering|scorching|baking)\b", re.I),
+     [{"action": "power", "value": True},
+      {"action": "mode", "value": "cool"},
+      {"action": "temperature", "value": 24}]),
     (re.compile(r"\b(cold|freezing|chilly|shivering)\b", re.I),
      [{"action": "power", "value": True},
       {"action": "mode", "value": "heat"},
@@ -770,6 +784,33 @@ def parse(text: str, devices: list[dict], now: datetime | None = None,
     # happened to touch, so do not silently resolve it to the fallback device.
     fb = None if comfort else fallback_device
     targets, target_label = resolve_targets(t, devices, default_room, fb)
+
+    if comfort:
+        # A complaint about the air is a request to move the air, and only a
+        # device that can move air can answer it. Resolved by room alone,
+        # "it's stuffy in the kitchen" landed on the Kitchen Fridge — the only
+        # appliance in that room — and the command layer refused `mode`, which
+        # reads as a broken assistant and is the last guardrail before a
+        # refrigerator is asked to hold 24 °C. Naming the room's appliances is
+        # both the honest answer and the useful one: the ACs are one room over.
+        wanted = {a["action"] for a in comfort}
+        # A device that declares no capability list cannot be judged, and the
+        # command layer stays the last word on what it accepts. Only a device
+        # that says what it can do and plainly cannot do this is dropped.
+        able = [d for d in targets
+                if not d.get("capabilities") or wanted <= set(d["capabilities"])]
+        if targets and not able:
+            room = (targets[0].get("room") or default_room) if targets else default_room
+            here = ", ".join(d["name"] for d in targets) or "nothing"
+            elsewhere = ", ".join(sorted({d["room"] for d in devices
+                                          if d["type"] == "air_conditioner"}))
+            res.update(intent="control", actions=[], confidence=0.7, comfort=True,
+                       clarify=(f"There is no air conditioner in the {room} — "
+                                f"what is there is {here}, and none of it can "
+                                f"cool a room. The air conditioners are in the "
+                                f"{elsewhere}."))
+            return res
+        targets = able
 
     if rule:
         if not actions:

@@ -69,7 +69,13 @@ Rules:
    the internet. When a question needs something from outside — "is it a good
    day to do laundry", "will it rain tomorrow" — say plainly that you cannot
    see it, then answer the part you can ("the washer is free, I can start it").
-   Never guess a forecast, and never answer a different question instead."""
+   Never guess a forecast, and never answer a different question instead.
+12. A house that is ALREADY in the state the request asks for is a finished
+   request, not a failed one. Read the device, find the AC already cooling at
+   24 °C, and the work is done: call `finish` and say so ("The bedroom AC is
+   already cooling at 24 °C."). Do not change a device just to have something
+   to report, and do not stop without calling `finish` — a turn that ends in
+   prose is thrown away, and the user gets "I did not understand" instead."""
 
 OFFER_SURE = """
 
@@ -179,6 +185,13 @@ def run(cfg: dict, text: str, adapter, now: datetime,
         ]
     deadline = time.monotonic() + DEADLINE_SECONDS
     steps = 0
+    # One nudge per stretch of prose, not one per turn. A stretch ends when the
+    # model does something: the nudge is owed again once there is new
+    # information to act on. Measured — "the bedroom is unbearable" was nudged
+    # at step 1, went on to call list_devices and get_state, then answered in
+    # prose at step 4 with the state it had just read, and the budget was
+    # already spent: the turn fell to the rules' generic help. A model that only
+    # talks still gets exactly one nudge, because talking never resets it.
     nudged = False
 
     # `adopt_parse` is only a real option when there is something to adopt. A
@@ -223,6 +236,12 @@ def run(cfg: dict, text: str, adapter, now: datetime,
                         hint = (f"The rule engine's reading is: {box.offer.get('would', '')}. "
                                 "Call `adopt_parse` to accept it, or call `control` / "
                                 "`schedule` to do it differently. ")
+                    # Rule 12, said again where it is needed: the model has just
+                    # described the work instead of doing it, which is the moment
+                    # it decides there is nothing to do. "Already cooling at 24"
+                    # is an answer; leaving it unwritten is a turn thrown away.
+                    hint += ("If the house is already in the state asked for, that "
+                             "is the work — call `finish` and say so. ")
                     messages.append({"role": "user", "content":
                                      "Nothing has been changed yet. Your last message described "
                                      "the work; that is not the work. " + hint +
@@ -257,6 +276,9 @@ def run(cfg: dict, text: str, adapter, now: datetime,
                     "tool_call_id": call.get("id") or f"call_{steps}",
                     "content": json.dumps(observation, ensure_ascii=False),
                 })
+            # The model has done something, so a sentence that follows is a
+            # report on new work and earns a nudge of its own.
+            nudged = False
 
             if box.finished:
                 break
