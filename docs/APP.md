@@ -21,9 +21,14 @@ they are served by `run.py`, a static host, or a WebView.
 
 | Screen | What is on it |
 |---|---|
-| Devices | Room tabs, a temperature / humidity / running summary, the two-column device grid, quick actions, and the next scheduled task |
+| Home | A one-sentence house status, three quick actions, a two-column room grid (temperature, humidity, how many devices are on), then the device cards. A pending Tier-2 question pins itself above all of it, so the answer is the first thing on the screen |
 | Schedule | Every task with its repeat rule and next run, plus per-task delete |
 | Assistant | The decision-mode switch, the conversation, suggestion chips, and the composer |
+
+The talk bar is not part of any one screen. It sits below all three, so the
+microphone and the text box are always one tap away — the senior-first layout
+treats "I want to say something" as the primary action of the app, not as a
+feature of one tab.
 
 The Assistant tab opens with a **Cascade / Agent** switch. It is not a setting for
 the app — it is a setting for *how the sentence gets answered*, and it applies to
@@ -46,8 +51,8 @@ that is asking. A tab left open overnight, a preview panel that never reloaded a
 a second server holding the port all look identical from the outside, and the
 wording of a reply is a poor way to tell them apart — twice it was not.
 
-The active tab is kept in the URL (`#devices`, `#jobs`, `#chat`), so a reload — or a
-relaunch from the home screen — lands where you left off instead of back on Devices.
+The active tab is kept in the URL (`#home`, `#schedule`, `#assistant`), so a reload — or a
+relaunch from the home screen — lands where you left off instead of back on Home.
 
 Tapping a device card opens a bottom sheet with the target temperature, the mode
 pills and a power button. Tapping the power button on the card itself toggles the

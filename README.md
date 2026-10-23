@@ -6,6 +6,8 @@ anything that would change someone's plans it asks about first, out loud, with a
 
 ![tests](https://github.com/tbrobo99/proactive-senior-care-comfort-agent/actions/workflows/tests.yml/badge.svg)
 
+<img src="docs/screenshot.png" width="270" alt="Home screen: house status, quick actions, room temperatures"> <img src="docs/screenshot-ask.png" width="270" alt="A Tier-2 question: the house asks before it changes a plan"> <img src="docs/screenshot-chat.png" width="270" alt="Assistant screen: the conversation and the permanent talk bar">
+
 This repository holds both phases of the project. [Phase 2](#phase-2--the-house-watches-itself)
 is what the agent is for; Phase 1, documented immediately below, is the substrate it stands on —
 the device layer, the durable scheduler, the rule-first language stack, and the phone app that
@@ -25,8 +27,6 @@ none has been built here — that needs an Android SDK.
 It answers in three tiers — deterministic rules for what they cover, a single model call
 for the rest, and a bounded tool loop for requests that need to look at the house before
 deciding. Section 2 explains why that order is the point.
-
-<img src="docs/screenshot.png" width="330" alt="Devices screen"> <img src="docs/screenshot-chat.png" width="330" alt="Assistant screen">
 
 ```
 You    turn on the living room AC
@@ -105,7 +105,7 @@ sensors.tick → MRI / TOI → policy.candidates → DECIDE → Tier 1: act, rep
 | Sensor stream | `app/sensors.py` | rooms, drum humidity, door sensors, power draw, calendar; JSONL + CSV to `data/sensors/` |
 | MRI | `app/risk.py` | Mold Risk Index — humidity × sealed time × warmth, with a 30-minute trend extrapolation |
 | TOI | `app/risk.py` | Thermal Overload Index — heat load vs the kitchen, read through the fridge, plus ovens that are *scheduled* but not yet on |
-| Tiers | `app/policy.py` | the whitelist: Tier 1 (ventilate, dehumidify, exhaust) runs alone; Tier 2 (delay, reschedule, preheat) never does |
+| Tiers | `app/policy.py` | the whitelist: Tier 1 (ventilate, dehumidify, exhaust, purify) runs alone; Tier 2 (delay) never does |
 | Approvals | `app/approval.py` | pending → confirmed / declined / **expired**. No answer in 5 minutes is a no |
 | The loop | `app/proactive.py` | ties it together and decides what the model is allowed to decide |
 
@@ -148,9 +148,9 @@ curl -X POST localhost:8848/api/approvals/<id>/confirm   # the only door into Ti
 The mold scenario ends with the washer ventilating and the balcony dehumidifier
 running, unprompted. The oven scenario turns on the kitchen range hood — the
 fridge's compressor is at 80% duty and the kitchen is climbing — and then asks
-*"…shall I delay the dryer to 23:00 off-peak?"* — aloud, because that question
-must not be missed. If nobody answers, the dryer keeps its schedule, which is
-the only honest reading of silence.
+*"I would like to turn the dryer off now and restart it at 11 PM tonight. Shall I?"*
+— aloud, because that question must not be missed. If nobody answers, the dryer
+keeps its schedule, which is the only honest reading of silence.
 
 ---
 
