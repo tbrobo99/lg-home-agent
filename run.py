@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app import config, db  # noqa: E402
 from app.agent import Agent  # noqa: E402
 from app.devices import MockAdapter, build_adapter  # noqa: E402
+from app.proactive import ProactiveEngine  # noqa: E402
 from app.scheduler import Scheduler  # noqa: E402
 from app.server import serve  # noqa: E402
 
@@ -52,6 +53,8 @@ def main() -> None:
     parser.add_argument("--port", type=int, help="override server.port")
     parser.add_argument("--no-browser", action="store_true",
                         help="do not open a browser window")
+    parser.add_argument("--scenario", choices=["idle", "mold", "oven", "oven_running"],
+                        help="load a deterministic starting state for the proactive engine")
     args = parser.parse_args()
 
     config.ensure_file()
@@ -72,6 +75,15 @@ def main() -> None:
     agent = Agent(adapter, cfg)
     scheduler = Scheduler(adapter)
     scheduler.start()
+
+    # Phase 2: the proactive loop. Sensors -> risk -> candidates -> decision ->
+    # Tier-1 execute / Tier-2 ask. It rides on the same adapter, so acting on
+    # the simulator and acting on real LG devices is the same code path.
+    engine = ProactiveEngine(adapter, cfg)
+    agent.proactive = engine  # so /api/approvals can reach it
+    if args.scenario:
+        engine.sensors.apply_scenario(args.scenario)
+    engine.start()
 
     # A hosted copy gets its port from the platform and must listen on all
     # interfaces; there is no `--lan` to pass there.
@@ -98,6 +110,8 @@ def main() -> None:
     print(f"  Devices   : {backend}"
           + (" (simulator, no LG account needed)" if backend == "mock" else " (LG ThinQ cloud)"))
     print(f"  LLM       : {llm_txt}")
+    print(f"  Proactive : sensors + MRI/TOI, Tier-1 auto / Tier-2 asks you"
+          + (f" (scenario: {args.scenario})" if args.scenario else ""))
     print("  Ctrl+C to stop")
     print("=" * 58)
 
@@ -109,6 +123,7 @@ def main() -> None:
         print("\nStopped.")
     finally:
         scheduler.stop()
+        engine.stop()
         httpd.server_close()
 
 

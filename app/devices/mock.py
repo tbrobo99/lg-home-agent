@@ -20,8 +20,12 @@ STATE_PATH = ROOT / "data" / "mock_state.json"
 DEVICES = [
     {"id": "ac_living", "name": "Living Room AC", "type": "air_conditioner", "room": "Living Room"},
     {"id": "ac_bedroom", "name": "Bedroom AC", "type": "air_conditioner", "room": "Bedroom"},
+    {"id": "ac_kitchen", "name": "Kitchen AC", "type": "air_conditioner", "room": "Kitchen"},
     {"id": "purifier", "name": "Living Room Purifier", "type": "air_purifier", "room": "Living Room"},
     {"id": "washer", "name": "Balcony Washer", "type": "washer", "room": "Balcony"},
+    {"id": "dryer", "name": "Balcony Dryer", "type": "dryer", "room": "Balcony"},
+    {"id": "dehumidifier", "name": "Balcony Dehumidifier", "type": "dehumidifier", "room": "Balcony"},
+    {"id": "oven", "name": "Kitchen Oven", "type": "oven", "room": "Kitchen"},
     {"id": "fridge", "name": "Kitchen Fridge", "type": "refrigerator", "room": "Kitchen"},
 ]
 
@@ -30,8 +34,14 @@ DEFAULT_STATES = {
                   "current_temp": 29.4, "humidity": 52, "fan": "auto"},
     "ac_bedroom": {"power": False, "mode": "cool", "target_temp": 27,
                    "current_temp": 28.6, "humidity": 55, "fan": "auto"},
+    "ac_kitchen": {"power": False, "mode": "cool", "target_temp": 25,
+                   "current_temp": 30.2, "humidity": 54, "fan": "auto"},
     "purifier": {"power": False, "fan": "auto", "pm25": 42},
-    "washer": {"power": False, "state": "standby", "remaining_min": 0},
+    "washer": {"power": False, "state": "standby", "remaining_min": 0,
+               "ventilating": False},
+    "dryer": {"power": False},
+    "dehumidifier": {"power": False, "fan": "auto"},
+    "oven": {"power": False, "target_temp": 180},
     "fridge": {"power": True, "fridge_temp": 3, "freezer_temp": -18},
 }
 
@@ -138,6 +148,11 @@ class MockAdapter(DeviceAdapter):
                     if device_id == "washer":
                         st["state"] = "washing" if value else "standby"
                         st["remaining_min"] = 45 if value else 0
+                elif name == "ventilate":
+                    # Drum micro-ventilation: the washer's own fan, safe to run
+                    # with the door shut. This is the Tier-1 mold response —
+                    # moisture out without opening the door for the user.
+                    st["ventilating"] = bool(value)
                 elif name == "temperature":
                     lo, hi = temperature_range(dev)
                     try:

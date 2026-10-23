@@ -14,12 +14,13 @@ from abc import ABC, abstractmethod
 CAPABILITIES: dict[str, list[str]] = {
     "air_conditioner": ["power", "temperature", "mode", "fan"],
     "air_purifier": ["power", "fan"],
-    "washer": ["power"],
+    "washer": ["power", "ventilate"],
     "dryer": ["power"],
     "refrigerator": ["power", "temperature"],
     "dish_washer": ["power"],
     "water_heater": ["power", "temperature"],
     "dehumidifier": ["power", "fan"],
+    "oven": ["power", "temperature"],
 }
 
 # A setpoint is not one range. 22 °C is a comfortable room and a fridge disaster;
@@ -30,6 +31,7 @@ TEMPERATURE_RANGE: dict[str, tuple[int, int]] = {
     "air_conditioner": (16, 30),
     "refrigerator": (1, 7),
     "water_heater": (30, 60),
+    "oven": (50, 250),
 }
 DEFAULT_TEMPERATURE_RANGE = (16, 30)
 

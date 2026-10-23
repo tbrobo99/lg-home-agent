@@ -329,14 +329,14 @@ class DecliningInPartTests(AgentModeTestBase):
     def test_a_failed_step_stays_in_the_trace(self):
         """Recovering from itself is the loop's whole advantage; show it."""
         self.fake.script = [
-            tool_call("control", device_id="ac_kitchen",
+            tool_call("control", device_id="ac_attic",
                       actions=[{"action": "power", "value": False}]),
             tool_call("adopt_parse"),
         ]
         result = self.ask("turn off the living room AC")
 
         self.assertEqual(len(result["trace"]), 2)
-        self.assertIn("ac_kitchen", result["trace"][0]["result"])
+        self.assertIn("ac_attic", result["trace"][0]["result"])
         self.assertTrue(result["adopted"])
 
     def test_the_offer_survives_a_schedule(self):

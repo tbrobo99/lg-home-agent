@@ -86,6 +86,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"messages": db.recent_messages(60)})
         if path == "/api/logs":
             return self._json({"logs": db.recent_logs(60)})
+        if path == "/api/approvals":
+            # Phase 2: Tier-2 requests waiting on the user. Absent engine ->
+            # empty list, never a 500.
+            engine = getattr(self.agent_ref, "proactive", None)
+            if engine is None:
+                return self._json({"approvals": []})
+            return self._json({"approvals": [a.to_dict() for a in engine.approvals.pending()]})
+        if path == "/api/proactive":
+            engine = getattr(self.agent_ref, "proactive", None)
+            return self._json(engine.state() if engine else {"running": False})
         if path.startswith("/api/"):
             return self._json({"error": "not found"}, 404)
         return self._static(path)
@@ -128,6 +138,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/messages/clear":
             db.clear_messages()
             return self._json({"ok": True})
+
+        m = re.fullmatch(r"/api/approvals/([A-Za-z0-9_]+)/(confirm|decline)", path)
+        if m:
+            # The only door into Tier-2 execution. No approval id, no action —
+            # the queue itself refuses anything not pending.
+            engine = getattr(self.agent_ref, "proactive", None)
+            if engine is None:
+                return self._json({"error": "proactive engine not running"}, 400)
+            fn = engine.confirm if m.group(2) == "confirm" else engine.decline
+            return self._json(fn(m.group(1)))
 
         return self._json({"error": "not found"}, 404)
 

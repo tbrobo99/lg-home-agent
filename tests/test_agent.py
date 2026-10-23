@@ -388,11 +388,13 @@ class ComfortDialogueTest(AgentTestBase):
         self.assertFalse(self.adapter.get_state("ac_living")["power"])
 
     def test_a_room_with_no_air_conditioner_is_not_the_fridge(self):
-        """Resolved by room alone, a complaint about the kitchen landed on the
-        Kitchen Fridge — the only appliance in that room — and the command layer
-        refused `mode`, which reads as a broken assistant and is the last
-        guardrail before a refrigerator is asked to hold 24 °C."""
-        r = self.agent.handle("it's stuffy in the kitchen")
+        """Resolved by room alone, a complaint about a room with no AC used to
+        land on the Kitchen Fridge — the only appliance in that room — and the
+        command layer refused `mode`, which reads as a broken assistant and is
+        the last guardrail before a refrigerator is asked to hold 24 °C. The
+        kitchen has had its own AC since Phase 2 (pre-cooling), so the room
+        without one is now the balcony."""
+        r = self.agent.handle("the balcony is stuffy")
 
         self.assertEqual(r["intent_name"], "control")
         self.assertIn("no air conditioner", r["reply"])
