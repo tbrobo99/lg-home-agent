@@ -14,6 +14,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+from . import build
+
 ROOT = Path(__file__).resolve().parent.parent
 # A hosted copy keeps its data on a mounted volume, not inside the source tree.
 DATA_DIR = Path(os.environ.get("DATA_DIR") or (ROOT / "data"))
@@ -162,10 +164,17 @@ def clear_jobs() -> int:
 # ---------------- messages ----------------
 
 def add_message(role: str, content: str, payload: dict | None = None) -> None:
+    payload = dict(payload or {})
+    # Which build wrote this row. A reply is a snapshot of the code that ran,
+    # and the message outlives it: three times today an old row was read as the
+    # answer to a new question, because nothing in the interface could say it
+    # had been written by a build that no longer runs. The stamp travels with
+    # the payload rather than the content, so it is data about the message.
+    payload["build"] = build.STAMP
     with _lock, conn() as c:
         c.execute(
             "INSERT INTO messages (role, content, payload, created_at) VALUES (?,?,?,?)",
-            (role, content, json.dumps(payload or {}, ensure_ascii=False), now_iso()),
+            (role, content, json.dumps(payload, ensure_ascii=False), now_iso()),
         )
 
 

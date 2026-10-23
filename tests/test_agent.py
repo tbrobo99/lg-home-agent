@@ -527,6 +527,18 @@ class BuildStampTest(AgentTestBase):
     def test_the_stamp_is_stable_for_the_same_source(self):
         self.assertEqual(build._digest(), build._digest())
 
+    def test_a_stored_message_carries_the_build_that_wrote_it(self):
+        """A reply outlives the code that wrote it. The stamp travels with the
+        payload, so the interface can mark a row that a build which no longer
+        runs produced — three times today an old row was read as the answer to
+        a new question."""
+        self.agent.handle("turn on the purifier")
+
+        rows = db.recent_messages(2)
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            self.assertEqual(row["payload"].get("build"), build.STAMP)
+
 
 if __name__ == "__main__":
     unittest.main()

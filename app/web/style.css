@@ -464,6 +464,20 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* When this turn happened, and — only when it matters — that the reply was
+   written by a build that no longer runs. The tag is not decoration: it is
+   the only thing that tells an old answer from a fresh one. */
+.msg .stamp {
+  display: block;
+  margin-top: 5px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+  opacity: .62;
+}
+.msg.user .stamp { color: #eaf7ee; }
+.msg.assistant .stamp { color: var(--ink-faint); }
+.msg .stamp .stale { color: #e0a23c; opacity: 1; font-weight: 600; }
 .msg.user {
   align-self: flex-end;
   background: var(--green-deep);

@@ -262,24 +262,36 @@ function renderJobs(jobs) {
 
 /* ---------- chat ---------- */
 
-function addMsg(role, text, meta) {
+function liveBuild() {
+  return (snapshot && snapshot.build) || "";
+}
+
+function addMsg(role, text, message) {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
   el.textContent = text;
-  if (meta && meta.trace && meta.trace.length) {
+  const tag = tagFor(message);
+  if (tag) {
+    const stamp = document.createElement("span");
+    stamp.className = "stamp";
+    stamp.textContent = tag;
+    el.appendChild(stamp);
+  }
+  const trace = (message && message.payload && message.payload.trace) || [];
+  if (trace.length) {
     const det = document.createElement("details");
     det.className = "trace";
     const sum = document.createElement("summary");
     // The offer is a decision point, not a tool call — count it out of the
     // steps so "3 steps" means three things the agent actually did.
-    const calls = meta.trace.filter((s) => s.tool !== "offer").length;
+    const calls = trace.filter((s) => s.tool !== "offer").length;
     const unit = calls === 1 ? "step" : "steps";
-    sum.textContent = meta.adopted
+    sum.textContent = (message.payload && message.payload.adopted)
       ? `took the rules' reading · ${calls} ${unit}`
       : `declined the reading · ${calls} ${unit}`;
     det.appendChild(sum);
     const ol = document.createElement("ol");
-    meta.trace.forEach((s) => {
+    trace.forEach((s) => {
       const li = document.createElement("li");
       li.textContent = s.result || s.tool;
       if (s.tool === "offer") li.className = "offer";
@@ -322,14 +334,17 @@ async function send(text) {
   const trimmed = (text || "").trim();
   if (!trimmed) return;
 
-  addMsg("user", trimmed);
+  addMsg("user", trimmed, { ts: new Date().toISOString() });
   $("#input").value = "";
   try {
     const data = await api("/api/chat", {
       method: "POST",
       body: JSON.stringify({ text: trimmed }),
     });
-    addMsg("assistant", data.reply || "…", data);
+    // The response carries the trace but not the envelope; the stamp reads
+    // `payload`, and the live reply is by definition this build's work.
+    addMsg("assistant", data.reply || "…",
+           { ts: new Date().toISOString(), payload: data });
     if (data.snapshot) {
       snapshot = data.snapshot;
       renderAll();
@@ -408,8 +423,9 @@ async function runScene(scene) {
 
 async function loadMessages() {
   const data = await api("/api/messages");
+  const live = (snapshot && snapshot.build) || "";
   $("#chat").innerHTML = "";
-  for (const m of data.messages || []) addMsg(m.role, m.content);
+  for (const m of data.messages || []) addMsg(m.role, m.content, m);
   if (!(data.messages || []).length) {
     addMsg("system", "Say something, or tap a suggestion below.");
   }
@@ -417,6 +433,30 @@ async function loadMessages() {
     const chat = $("#chat");
     chat.scrollTop = chat.scrollHeight;
   });
+}
+
+/* ---------- message tag ---------- */
+
+function tagFor(msg) {
+  if (!msg) return null;
+  const rows = [];
+  const when = msg.ts || msg.created_at;
+  if (when) {
+    // minutes-seconds only: same day is the only case this app deals in
+    const t = new Date(when);
+    rows.push(isNaN(t) ? String(when).slice(11, 16)
+                       : t.toTimeString().slice(0, 5));
+  }
+  // A reply written by a build that no longer runs is a *historical* answer,
+  // and reading one as today's is the confusion this marks out. A row with no
+  // stamp at all predates the stamp, which is the same thing by a shorter
+  // route. Shown only when it differs, so a normal conversation carries no
+  // extra ink.
+  const b = (msg.payload || {}).build;
+  if (liveBuild() && (!b || b !== liveBuild())) {
+    rows.push(b ? `old build ${b}` : "older build");
+  }
+  return rows.length ? rows.join(" · ") : null;
 }
 
 /* ---------- device sheet ---------- */
