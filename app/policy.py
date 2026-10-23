@@ -6,9 +6,9 @@ where that claim is enforced — the only place in the codebase that decides
 whether a proposed action may run on its own.
 
 Tier 1 (automatic, logged, reported): drum micro-ventilation, dehumidifier,
-air purifier, room pre-cooling. Reversible, low-power, and — the property that
-actually matters — worst case is a slightly dry room, never a ruined garment
-or a delayed meal.
+air purifier, kitchen exhaust. Reversible, low-power, and — the property that
+actually matters — worst case is a slightly dry room or a fan running for
+nothing, never a ruined garment or a delayed meal.
 
 Tier 2 (approval required): anything that moves a *schedule* or touches a
 *heating* appliance. Delaying the dryer, rescheduling the washer, pre-heating
@@ -31,7 +31,7 @@ ACTION_TIERS: dict[str, str] = {
     "ventilate_washer": TIER1,
     "dehumidifier_on": TIER1,
     "purifier_on": TIER1,
-    "pre_cool": TIER1,
+    "ventilate_kitchen": TIER1,
     "delay_dryer": TIER2,
     "reschedule_washer": TIER2,
     "preheat_cooktop": TIER2,
@@ -105,17 +105,21 @@ def candidates(risk, snapshot: dict) -> list[Candidate]:
                      "repeat_label": "one time at 23:00"},
                 reason=f"{snapshot.get('heat_load_w', 0)} W of heat load, kitchen at {risk.current:.1f}\u00b0C",
             ))
-        ac = snapshot.get("ac_targets", {}).get("Kitchen", {})
-        if not (ac.get("power") and ac.get("mode") == "cool"):
+        # The kitchen has no AC, so exhausting it is the whole move. The fridge
+        # duty is the evidence: past 60% the compressor is paying for the heat.
+        hood = ap.get("range_hood", {})
+        if not hood.get("power"):
             out.append(Candidate(
-                kind="pre_cool",
-                device_id="ac_kitchen",
-                device_name="Kitchen AC",
+                kind="ventilate_kitchen",
+                device_id="range_hood",
+                device_name="Kitchen Range Hood",
                 actions=[{"action": "power", "value": True},
-                         {"action": "mode", "value": "cool"},
-                         {"action": "temperature", "value": 24}],
-                label="pre-cool the kitchen to 24\u00b0C",
-                reason=f"predicted {risk.predicted:.1f}\u00b0C in {risk.drivers.get('oven_scheduled_in_min') or 30} min",
+                         {"action": "fan", "value": "high"}],
+                label="turn on the kitchen range hood to exhaust the heat",
+                reason=(f"fridge compressor at "
+                        f"{snapshot['appliances'].get('fridge', {}).get('duty_cycle', 0):.0%} duty, "
+                        f"predicted {risk.predicted:.1f}\u00b0C in "
+                        f"{risk.drivers.get('oven_scheduled_in_min') or 30} min"),
             ))
 
     return out

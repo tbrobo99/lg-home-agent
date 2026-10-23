@@ -556,7 +556,54 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6;
   place-items: center;
   cursor: pointer;
 }
+
+/* Voice: the mic is a secondary channel, so it is quieter than send. The
+   listening state is the one moment it deserves the full-strength colour. */
+.composer .mic {
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid var(--card-line);
+  color: var(--ink-dim);
+}
+.composer .mic.listening {
+  background: var(--red, #e5484d);
+  border-color: transparent;
+  color: #fff;
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, .45); }
+  50% { box-shadow: 0 0 0 6px rgba(229, 72, 77, 0); }
+}
+.composer .lang {
+  width: auto;
+  min-width: 44px;
+  padding: 0 10px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid var(--card-line);
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  cursor: pointer;
+}
 .composer button svg { width: 19px; height: 19px; }
+
+/* Read-aloud toggle. Off is the default: a phone that talks unbidden is a
+   phone people stop carrying. */
+.tts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  border: 1px solid var(--card-line);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12px;
+}
+.tts svg { width: 15px; height: 15px; }
+.tts.active { color: var(--green); border-color: rgba(52, 199, 123, .45); }
 
 /* ---------- tab bar ---------- */
 

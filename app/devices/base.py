@@ -20,6 +20,7 @@ CAPABILITIES: dict[str, list[str]] = {
     "dish_washer": ["power"],
     "water_heater": ["power", "temperature"],
     "dehumidifier": ["power", "fan"],
+    "range_hood": ["power", "fan"],
     "oven": ["power", "temperature"],
 }
 
@@ -56,6 +57,7 @@ TYPE_LABELS = {
     "styler": "Styler",
     "robot_cleaner": "Robot Cleaner",
     "oven": "Oven",
+    "range_hood": "Kitchen Range Hood",
 }
 
 MODE_LABELS = {

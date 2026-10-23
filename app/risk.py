@@ -13,7 +13,14 @@ only when it is bad now.
 TOI — Thermal Overload Index. Heat-generating load (oven, dryer, dishwasher)
 measured against the room's ability to shed it, plus a calendar term: an oven
 scheduled within the next 30 minutes is a load that has not arrived yet, and
-pre-cooling is only useful before it does.
+ventilating before it does is only useful ahead of time.
+
+The kitchen's temperature is read through the fridge, because that is how a
+real deployment would read it: Korean apartments put air conditioners in the
+living room and bedrooms, and an LG smart fridge reports an external
+temperature plus the compressor's duty cycle through ThinQ. A compressor
+working harder is a kitchen getting hotter — and the fridge is the appliance
+that pays for it, which is the whole reason this index exists.
 
 Neither index is a black box and neither is trained. They are the cheap,
 deterministic part of the decision loop: they run every tick without an LLM in
@@ -29,8 +36,8 @@ MOLD_THRESHOLD = 50.0
 THERMAL_THRESHOLD = 50.0
 PREDICT_MINUTES = 30
 
-# Ovens scheduled this soon count as present load: pre-cooling after the fact
-# is just wasted electricity.
+# Ovens scheduled this soon count as present load: ventilating after the fact
+# is just a fan running for nothing.
 CALENDAR_LOOKAHEAD_MIN = 30
 
 
@@ -121,6 +128,11 @@ def thermal_risk(snapshot: dict, history, now: datetime | None = None) -> Risk |
     heat_w = int(snapshot.get("heat_load_w") or 0)
     kitchen = snapshot["rooms"].get("Kitchen", {})
     kitchen_temp = float(kitchen.get("temp") or 0.0)
+    # The fridge is the kitchen's sensor node. Its probe lags the room, so a
+    # rising duty cycle is the earliest honest signal that heat is accumulating.
+    fridge = snapshot["appliances"].get("fridge", {})
+    fridge_external = float(fridge.get("external_temp") or kitchen_temp)
+    fridge_duty = float(fridge.get("duty_cycle") or 0.0)
 
     oven_soon = False
     soonest = None
@@ -137,10 +149,12 @@ def thermal_risk(snapshot: dict, history, now: datetime | None = None) -> Risk |
         return None
 
     # Load ratio: 2500 W is a full kitchen; each degree above 27 °C is a room
-    # that has stopped shedding heat; a scheduled oven is load in advance.
+    # that has stopped shedding heat; a compressor past 60% duty is a fridge
+    # paying for the kitchen's heat; a scheduled oven is load in advance.
     score = _clamp(
         heat_w / 25.0
         + max(0.0, kitchen_temp - 27.0) * 6.0
+        + max(0.0, fridge_duty - 0.6) * 60.0
         + (15.0 if oven_soon else 0.0)
     )
     series = history.get("Kitchen.temp") if history else None
@@ -157,6 +171,8 @@ def thermal_risk(snapshot: dict, history, now: datetime | None = None) -> Risk |
         drivers={
             "heat_load_w": heat_w,
             "kitchen_temp": round(kitchen_temp, 1),
+            "fridge_external_temp": round(fridge_external, 1),
+            "fridge_duty_cycle": round(fridge_duty, 2),
             "oven_scheduled_in_min": round(soonest) if soonest is not None else None,
             "temp_trend_per_min": round(slope * 60, 3),
             "user_home": snapshot["occupancy"].get("user_home", True),

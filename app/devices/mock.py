@@ -20,13 +20,13 @@ STATE_PATH = ROOT / "data" / "mock_state.json"
 DEVICES = [
     {"id": "ac_living", "name": "Living Room AC", "type": "air_conditioner", "room": "Living Room"},
     {"id": "ac_bedroom", "name": "Bedroom AC", "type": "air_conditioner", "room": "Bedroom"},
-    {"id": "ac_kitchen", "name": "Kitchen AC", "type": "air_conditioner", "room": "Kitchen"},
     {"id": "purifier", "name": "Living Room Purifier", "type": "air_purifier", "room": "Living Room"},
+    {"id": "range_hood", "name": "Kitchen Range Hood", "type": "range_hood", "room": "Kitchen"},
+    {"id": "oven", "name": "Kitchen Oven", "type": "oven", "room": "Kitchen"},
+    {"id": "fridge", "name": "Kitchen Fridge", "type": "refrigerator", "room": "Kitchen"},
     {"id": "washer", "name": "Balcony Washer", "type": "washer", "room": "Balcony"},
     {"id": "dryer", "name": "Balcony Dryer", "type": "dryer", "room": "Balcony"},
     {"id": "dehumidifier", "name": "Balcony Dehumidifier", "type": "dehumidifier", "room": "Balcony"},
-    {"id": "oven", "name": "Kitchen Oven", "type": "oven", "room": "Kitchen"},
-    {"id": "fridge", "name": "Kitchen Fridge", "type": "refrigerator", "room": "Kitchen"},
 ]
 
 DEFAULT_STATES = {
@@ -34,15 +34,18 @@ DEFAULT_STATES = {
                   "current_temp": 29.4, "humidity": 52, "fan": "auto"},
     "ac_bedroom": {"power": False, "mode": "cool", "target_temp": 27,
                    "current_temp": 28.6, "humidity": 55, "fan": "auto"},
-    "ac_kitchen": {"power": False, "mode": "cool", "target_temp": 25,
-                   "current_temp": 30.2, "humidity": 54, "fan": "auto"},
     "purifier": {"power": False, "fan": "auto", "pm25": 42},
+    "range_hood": {"power": False, "fan": "auto"},
+    "oven": {"power": False, "target_temp": 180},
+    # LG smart fridges report an external (room) temperature and expose the
+    # compressor's energy draw through ThinQ. That pair is the kitchen's real
+    # thermal signal — a kitchen in a Korean apartment has no AC of its own.
+    "fridge": {"power": True, "fridge_temp": 3, "freezer_temp": -18,
+               "external_temp": 29.0, "duty_cycle": 0.35},
     "washer": {"power": False, "state": "standby", "remaining_min": 0,
                "ventilating": False},
     "dryer": {"power": False},
     "dehumidifier": {"power": False, "fan": "auto"},
-    "oven": {"power": False, "target_temp": 180},
-    "fridge": {"power": True, "fridge_temp": 3, "freezer_temp": -18},
 }
 
 
@@ -107,6 +110,15 @@ class MockAdapter(DeviceAdapter):
                         st["pm25"] = max(
                             5, st["pm25"] - (3 if st.get("power") else -2) + random.randint(-1, 1)
                         )
+
+                    # The fridge reports the kitchen it stands in: a hotter room
+                    # means a harder-working compressor. This is the signal the
+                    # thermal index reads, because the kitchen has no AC.
+                    if st.get("external_temp") is not None:
+                        st["external_temp"] = round(
+                            min(38.0, max(18.0, st["external_temp"] + random.uniform(-0.05, 0.05))), 1)
+                        st["duty_cycle"] = round(
+                            max(0.15, min(1.0, 0.15 + (st["external_temp"] - 18.0) / 20.0)), 2)
                 self._persist()
 
     def stop(self) -> None:

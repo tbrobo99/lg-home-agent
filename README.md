@@ -94,10 +94,27 @@ sensors.tick → MRI / TOI → policy.candidates → DECIDE → Tier 1: act, rep
 |---|---|---|
 | Sensor stream | `app/sensors.py` | rooms, drum humidity, door sensors, power draw, calendar; JSONL + CSV to `data/sensors/` |
 | MRI | `app/risk.py` | Mold Risk Index — humidity × sealed time × warmth, with a 30-minute trend extrapolation |
-| TOI | `app/risk.py` | Thermal Overload Index — heat load vs the room, plus ovens that are *scheduled* but not yet on |
-| Tiers | `app/policy.py` | the whitelist: Tier 1 (ventilate, dehumidify, pre-cool) runs alone; Tier 2 (delay, reschedule, preheat) never does |
+| TOI | `app/risk.py` | Thermal Overload Index — heat load vs the kitchen, read through the fridge, plus ovens that are *scheduled* but not yet on |
+| Tiers | `app/policy.py` | the whitelist: Tier 1 (ventilate, dehumidify, exhaust) runs alone; Tier 2 (delay, reschedule, preheat) never does |
 | Approvals | `app/approval.py` | pending → confirmed / declined / **expired**. No answer in 5 minutes is a no |
 | The loop | `app/proactive.py` | ties it together and decides what the model is allowed to decide |
+
+**The kitchen has no air conditioner** — Korean apartments put them in the
+living room and bedrooms. So its thermal state is read the way a real
+deployment would read it: through the fridge. LG smart fridges report an
+external (room) temperature and expose the compressor's energy draw through
+ThinQ, and a compressor working harder is a kitchen getting hotter. The
+fridge is also the appliance that pays for that heat, which is why the index
+exists at all. The only Tier-1 actuator the kitchen has is the range hood.
+
+**Voice is a channel, not the product.** The composer's mic button uses the
+browser's Web Speech API (KO by default, EN for demos) and the text box stays
+permanent — a misheard word is fixed by typing, never by repeating yourself at
+a machine. Dialects and elderly speech are where ASR is weakest, so the
+fallback is the design, not an apology. Replies can be read aloud (the toggle
+in the chat header), and a Tier-2 question is *always* read aloud whether or
+not the toggle is on: an unanswered request times out into a no, and a no the
+user never heard is not a choice.
 
 **Where the model sits.** The LLM is not the timer, not the sensor, and not the
 safety gate — those are deterministic code. It owns exactly what rules cannot
@@ -119,9 +136,11 @@ curl -X POST localhost:8848/api/approvals/<id>/confirm   # the only door into Ti
 ```
 
 The mold scenario ends with the washer ventilating and the balcony dehumidifier
-running, unprompted. The oven scenario pre-cools the kitchen and then asks —
-*"…shall I delay the dryer to 23:00 off-peak?"* — and if nobody answers, the
-dryer keeps its schedule, which is the only honest reading of silence.
+running, unprompted. The oven scenario turns on the kitchen range hood — the
+fridge's compressor is at 80% duty and the kitchen is climbing — and then asks
+*"…shall I delay the dryer to 23:00 off-peak?"* — aloud, because that question
+must not be missed. If nobody answers, the dryer keeps its schedule, which is
+the only honest reading of silence.
 
 ---
 

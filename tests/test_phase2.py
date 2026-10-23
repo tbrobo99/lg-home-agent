@@ -33,8 +33,8 @@ class FakeAdapter:
     def __init__(self):
         self.applied: list[tuple[str, list]] = []
         self.devices = [
-            {"id": "ac_kitchen", "name": "Kitchen AC", "type": "air_conditioner",
-             "room": "Kitchen", "online": True, "capabilities": ["power", "temperature", "mode", "fan"]},
+            {"id": "range_hood", "name": "Kitchen Range Hood", "type": "range_hood",
+             "room": "Kitchen", "online": True, "capabilities": ["power", "fan"]},
             {"id": "washer", "name": "Balcony Washer", "type": "washer",
              "room": "Balcony", "online": True, "capabilities": ["power", "ventilate"]},
             {"id": "dryer", "name": "Balcony Dryer", "type": "dryer",
@@ -158,7 +158,7 @@ class PolicyTest(Base):
         snap = e.sensors.snapshot()
         r = risk.thermal_risk(snap, e.sensors.history)
         cands = {c.kind: c for c in policy.candidates(r, snap)}
-        self.assertEqual(cands["pre_cool"].tier, policy.TIER1)
+        self.assertEqual(cands["ventilate_kitchen"].tier, policy.TIER1)
         self.assertEqual(cands["delay_dryer"].tier, policy.TIER2)
         self.assertIsNotNone(cands["delay_dryer"].job)  # the 23:00 restart job
 
@@ -216,7 +216,7 @@ class ProactiveNoLLMTest(Base):
         applied = {}
         for dev, acts in self.adapter.applied:
             applied.setdefault(dev, []).extend(a["action"] for a in acts)
-        self.assertIn("power", applied.get("ac_kitchen", []))   # pre-cool ran
+        self.assertIn("power", applied.get("range_hood", []))   # hood ran
         self.assertNotIn("dryer", applied)                       # dryer untouched
         pending = e.approvals.pending()
         self.assertEqual(len(pending), 1)
@@ -320,12 +320,12 @@ class ProactiveLLMTest(Base):
 
     def test_llm_choosing_only_tier1_skips_the_question(self):
         with FakeLLM() as fake:
-            fake.prose_reply = '{"chosen": [{"kind": "pre_cool"}], "note": "cooling first"}'
+            fake.prose_reply = '{"chosen": [{"kind": "ventilate_kitchen"}], "note": "exhaust the heat"}'
             e = self._engine_llm(fake)
             e.sensors.apply_scenario("oven")
             e.tick()
             applied = {dev for dev, _ in self.adapter.applied}
-            self.assertIn("ac_kitchen", applied)
+            self.assertIn("range_hood", applied)
             self.assertNotIn("dryer", applied)
             self.assertEqual(e.approvals.pending(), [])  # delay was never chosen
 

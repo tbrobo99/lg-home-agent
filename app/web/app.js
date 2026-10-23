@@ -11,6 +11,8 @@ const ICON = {
   refrigerator: "i-fridge",
   water_heater: "i-fridge",
   dehumidifier: "i-purifier",
+  range_hood: "i-hood",
+  oven: "i-hood",
 };
 
 const BACKEND_LABEL = { mock: "Simulator", thinq: "LG ThinQ" };
@@ -148,8 +150,18 @@ function cardSub(d) {
       text = on ? `Washing · ${st.remaining_min == null ? "?" : st.remaining_min} min` : "Standby";
       break;
     case "refrigerator":
+      // The fridge is the kitchen's sensor node: what its probe reads and how
+      // hard the compressor works. Shown because that is the kitchen's only
+      // honest temperature channel — it has no AC of its own.
       text = `Fridge ${st.fridge_temp == null ? "—" : st.fridge_temp}°C · ` +
-             `Freezer ${st.freezer_temp == null ? "—" : st.freezer_temp}°C`;
+             `Kitchen ${st.external_temp == null ? "—" : st.external_temp + "°C"} · ` +
+             `compressor ${st.duty_cycle == null ? "—" : Math.round(st.duty_cycle * 100) + "%"}`;
+      break;
+    case "range_hood":
+      text = on ? `Exhaust · fan ${st.fan || "auto"}` : "Off";
+      break;
+    case "oven":
+      text = on ? `Heating · ${st.target_temp == null ? "—" : st.target_temp + "°C"}` : "Off";
       break;
     default:
       text = on ? "On" : "Off";
@@ -260,6 +272,98 @@ function renderJobs(jobs) {
     `<p class="hint">Repeat with “every day”, “on weekdays”, “every Monday at 8 am”.</p>`;
 }
 
+/* ---------- voice ---------- */
+
+/* Voice is an input channel, never the only one. The browser does the
+   listening (Web Speech API, no server round trip for audio) and the text box
+   stays permanent: a misheard word is corrected by typing, never by repeating
+   yourself at a machine. Dialects and elderly speech are where ASR is weakest,
+   which is exactly why the fallback matters more than the feature. */
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+// The household is Korean, so Korean is the default. EN is there for demos in
+// English; the agent's LLM layer parses both, the rule layer only English.
+const VOICE_LANGS = ["ko-KR", "en-US"];
+let voiceLang = VOICE_LANGS[0];
+let recognition = null;
+let listening = false;
+let ttsOn = false;
+
+function voiceSupported() {
+  return typeof SpeechRecognition !== "undefined";
+}
+
+function speak(text, force) {
+  if (!(ttsOn || force) || !("speechSynthesis" in window)) return;
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(clean);
+  utter.lang = voiceLang;
+  utter.rate = 0.95;  // slightly slow: the audience is not in a hurry
+  window.speechSynthesis.speak(utter);
+}
+
+function setListening(on) {
+  listening = on;
+  const btn = $("#mic");
+  if (!btn) return;
+  btn.classList.toggle("listening", on);
+  btn.setAttribute("aria-pressed", String(on));
+}
+
+function startVoice() {
+  if (!voiceSupported()) {
+    toast("Voice input needs Chrome or Safari — please type.");
+    return;
+  }
+  if (listening) {
+    stopVoice();
+    return;
+  }
+  if (!recognition) {
+    recognition = new SpeechRecognition();
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.onresult = (event) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        interim += event.results[i][0].transcript;
+      }
+      // Live in the text box: the user sees what was heard before it is sent,
+      // which is the difference between trusting a microphone and guessing.
+      $("#input").value = interim;
+      const last = event.results[event.results.length - 1];
+      if (last.isFinal) send(interim);
+    };
+    recognition.onerror = (event) => {
+      if (event.error === "not-allowed") {
+        toast("Microphone permission denied — please type.");
+      }
+      setListening(false);
+    };
+    recognition.onend = () => setListening(false);
+  }
+  recognition.lang = voiceLang;
+  $("#input").value = "";
+  try {
+    recognition.start();
+    setListening(true);
+  } catch (err) {
+    setListening(false);  // already started; the click is a stop
+  }
+}
+
+function stopVoice() {
+  if (recognition) recognition.stop();
+  setListening(false);
+}
+
+function renderLangButton() {
+  const btn = $("#lang");
+  if (btn) btn.textContent = voiceLang.startsWith("ko") ? "KO" : "EN";
+}
+
 /* ---------- chat ---------- */
 
 function liveBuild() {
@@ -302,6 +406,12 @@ function addMsg(role, text, message) {
   }
   $("#chat").appendChild(el);
   $("#chat").scrollTop = $("#chat").scrollHeight;
+
+  // Read the reply out loud when asked to — and always read the question the
+  // house is waiting on, because that is the one message that must not be
+  // missed: an unanswered Tier-2 request times out into a no.
+  const approval = message && message.payload && message.payload.approval;
+  if (ttsOn || approval) speak(text);
 }
 
 function renderChips() {
@@ -665,6 +775,23 @@ $("#composer").addEventListener("submit", (event) => {
   send($("#input").value);
 });
 
+$("#mic").addEventListener("click", startVoice);
+
+$("#lang").addEventListener("click", () => {
+  voiceLang = VOICE_LANGS[(VOICE_LANGS.indexOf(voiceLang) + 1) % VOICE_LANGS.length];
+  renderLangButton();
+  toast(voiceLang.startsWith("ko") ? "한국어 음성 인식" : "English voice input");
+});
+
+$("#tts").addEventListener("click", () => {
+  ttsOn = !ttsOn;
+  const btn = $("#tts");
+  btn.classList.toggle("active", ttsOn);
+  btn.setAttribute("aria-pressed", String(ttsOn));
+  if (!ttsOn && "speechSynthesis" in window) window.speechSynthesis.cancel();
+  toast(ttsOn ? "Reading replies aloud" : "Reading aloud off");
+});
+
 $("#clearJobs").addEventListener("click", () => {
   api("/api/jobs/clear", { method: "POST" })
     .then((data) => {
@@ -679,6 +806,7 @@ $("#clearJobs").addEventListener("click", () => {
 /* ---------- boot ---------- */
 
 refresh();
+renderLangButton();
 setInterval(refresh, 4000);
 
 const startTab = (location.hash || "").replace("#", "");

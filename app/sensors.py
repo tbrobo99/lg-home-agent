@@ -9,9 +9,16 @@ data/sensors/latest.csv.
 
 It is deliberately separate from the device adapter. Sensors *observe* the
 environment; the adapter *actuates* appliances. The oven heating the kitchen is
-a sensor fact; the AC pre-cooling it is an adapter action. Keeping the two
-apart is what lets the proactive loop close a real loop: act, watch the room
+a sensor fact; the range hood exhausting it is an adapter action. Keeping the
+two apart is what lets the proactive loop close a real loop: act, watch the room
 answer, act again.
+
+The kitchen has no air conditioner — Korean apartments put them in the living
+room and bedrooms. Its thermal state is read the way a real deployment would
+read it: through the fridge. LG smart fridges report an external (room)
+temperature and expose the compressor's energy draw through ThinQ, and a
+compressor working harder is a kitchen getting hotter. The range hood is what
+the loop can actually do about it.
 
 Physics here is simple and explainable on purpose. Every number the risk model
 consumes can be traced back to a rule in `_tick` — the point of Phase 2 is the
@@ -75,6 +82,12 @@ class SensorSimulator:
             "dryer": {"power": False},
             "oven": {"power": False, "target_temp": 180},
             "dehumidifier": {"power": False},
+            "range_hood": {"power": False, "fan": "auto"},
+            # The fridge is the kitchen's sensor node: what its external probe
+            # reads and how hard its compressor works. duty_cycle is derived
+            # from external_temp, exactly as the real appliance's draw tracks
+            # the room it stands in.
+            "fridge": {"power": True, "external_temp": 29.0, "duty_cycle": 0.35},
         }
         self.ac_targets: dict[str, dict] = {}  # room -> {"target_temp", "mode", "power"}
         self.occupancy = {"user_home": True}
@@ -122,9 +135,16 @@ class SensorSimulator:
         ap = self.appliances
 
         # Oven: a 2.2 kW element in a closed kitchen. Fast enough to see inside
-        # a demo, slow enough that pre-cooling has a point.
+        # a demo, slow enough that ventilation has a point.
         if ap["oven"]["power"]:
             rooms["Kitchen"]["temp"] = _clamp(rooms["Kitchen"]["temp"] + 0.05 * dt, 16, 42)
+
+        # Range hood: the only kitchen actuator there is. It exhausts hot air,
+        # so the kitchen sheds heat toward the outdoor baseline instead of
+        # accumulating it.
+        if ap["range_hood"]["power"]:
+            rooms["Kitchen"]["temp"] -= _clamp(
+                (rooms["Kitchen"]["temp"] - 26.0) * 0.03 * dt, 0, 0.3 * dt)
 
         # AC: drifts its room toward the setpoint, exactly like the mock
         # adapter does for device-reported temperature.
@@ -148,6 +168,19 @@ class SensorSimulator:
         dh = 0.6 if ap["dehumidifier"]["power"] else 0.05
         rooms["Balcony"]["humidity"] += _clamp((45 if ap["dehumidifier"]["power"] else 62)
                                                - rooms["Balcony"]["humidity"], -dh * dt, dh * dt)
+
+        # The fridge reads the kitchen it stands in, with lag: its probe sits on
+        # the body, not in the air. duty_cycle follows the probe — a hotter
+        # kitchen is a compressor that never gets to rest. This is the kitchen's
+        # only honest temperature channel, since the kitchen has no AC.
+        fridge = ap["fridge"]
+        if fridge.get("power", True):
+            goal = rooms["Kitchen"]["temp"]
+            fridge["external_temp"] += _clamp((goal - fridge["external_temp"]) * 0.01 * dt,
+                                              -0.2 * dt, 0.2 * dt)
+            fridge["external_temp"] = round(min(38.0, max(18.0, fridge["external_temp"])), 1)
+            fridge["duty_cycle"] = round(
+                max(0.15, min(1.0, 0.15 + (fridge["external_temp"] - 18.0) / 20.0)), 2)
 
         # Washer drum: the mold model. A finished cycle leaves the drum wet;
         # a shut door traps it; micro-ventilation bleeds it off slowly.
@@ -181,8 +214,8 @@ class SensorSimulator:
     def note_action(self, device_id: str, actions: list[dict]) -> None:
         """Let the environment answer an actuator command.
 
-        Without this the proactive loop would act into a void: the AC would
-        "pre-cool" a kitchen whose temperature ignores it, and the mold
+        Without this the proactive loop would act into a void: the range hood
+        would "ventilate" a kitchen whose temperature ignores it, and the mold
         intervention would never show the drum drying.
         """
         with self._lock:
@@ -190,8 +223,8 @@ class SensorSimulator:
                 name, value = act.get("action"), act.get("value")
                 if device_id.startswith("ac_"):
                     room = next((d_room for d_id, d_room in
-                                 (("ac_living", "Living Room"), ("ac_bedroom", "Bedroom"),
-                                  ("ac_kitchen", "Kitchen")) if d_id == device_id), None)
+                                 (("ac_living", "Living Room"), ("ac_bedroom", "Bedroom"))
+                                 if d_id == device_id), None)
                     if room:
                         ac = self.ac_targets.setdefault(room, {"power": False, "mode": "cool",
                                                                "target_temp": 26})
@@ -210,8 +243,8 @@ class SensorSimulator:
                         w["drum_humidity"] = 60.0
                     elif name == "ventilate":
                         w["ventilating"] = bool(value)
-                elif device_id in self.appliances and name == "power":
-                    self.appliances[device_id]["power"] = bool(value)
+                elif device_id in self.appliances and name in ("power", "fan"):
+                    self.appliances[device_id][name] = value
                 elif device_id == "oven" and name == "temperature":
                     self.appliances["oven"]["target_temp"] = value
 
@@ -233,6 +266,8 @@ class SensorSimulator:
                 "dryer": {"power": False},
                 "oven": {"power": False, "target_temp": 180},
                 "dehumidifier": {"power": False},
+                "range_hood": {"power": False, "fan": "auto"},
+                "fridge": {"power": True, "external_temp": 29.0, "duty_cycle": 0.35},
             }
             self.ac_targets.clear()
             self.calendar = []
@@ -255,9 +290,14 @@ class SensorSimulator:
                     "end": (now + timedelta(minutes=80)).isoformat(timespec="minutes"),
                 }]
                 self.appliances["dryer"]["power"] = True
+                # The kitchen is already hot and the fridge is feeling it: the
+                # probe lags the room, and the duty cycle is what that heat
+                # costs. This is the kitchen's only temperature channel.
+                self.rooms["Kitchen"]["temp"] = 31.5
+                self.appliances["fridge"]["external_temp"] = 31.0
+                self.appliances["fridge"]["duty_cycle"] = 0.8
                 if name == "oven_running":
                     self.appliances["oven"]["power"] = True
-                    self.rooms["Kitchen"]["temp"] = 31.5
 
     # ---------------------------------------------------------------- output
 

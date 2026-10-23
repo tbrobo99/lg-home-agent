@@ -34,6 +34,18 @@
     <rect x="5.5" y="2.5" width="13" height="19" rx="2.5"/>
     <path d="M5.5 9.5h13M8 5.5v2M8 12v3"/>
   </symbol>
+  <symbol id="i-hood" viewBox="0 0 24 24">
+    <path d="M4 4h16l-1.5 7h-13z"/>
+    <path d="M12 11v6M8.5 20.5h7M9 17h6"/>
+  </symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24">
+    <rect x="9" y="3" width="6" height="11" rx="3"/>
+    <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/>
+  </symbol>
+  <symbol id="i-speaker" viewBox="0 0 24 24">
+    <path d="M4 9.5h3.5L12 6v12L7.5 14.5H4z"/>
+    <path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7.5 7.5 0 0 1 0 10"/>
+  </symbol>
   <symbol id="i-power" viewBox="0 0 24 24">
     <path d="M12 4.5v7"/>
     <path d="M7.6 7.2a7 7 0 1 0 8.8 0"/>
@@ -109,12 +121,21 @@
           <button type="button" data-agent-mode="cascade" aria-pressed="false">Cascade</button>
           <button type="button" data-agent-mode="agent" aria-pressed="false">Agent</button>
         </div>
+        <button type="button" id="tts" class="ghost tts" aria-pressed="false"
+                title="Read replies out loud">
+          <svg viewBox="0 0 24 24"><use href="#i-speaker"/></svg>
+          <span>Read aloud</span>
+        </button>
         <p class="mode-note" id="modeNote"></p>
       </div>
       <div class="chat" id="chat"></div>
       <div class="chips" id="chips"></div>
       <form class="composer" id="composer">
+        <button type="button" id="mic" class="mic" aria-label="Voice input" aria-pressed="false">
+          <svg viewBox="0 0 24 24"><use href="#i-mic"/></svg>
+        </button>
         <input id="input" type="text" autocomplete="off" placeholder="Ask me anything…">
+        <button type="button" id="lang" class="lang" title="Voice language">KO</button>
         <button type="submit" aria-label="Send">
           <svg viewBox="0 0 24 24"><use href="#i-send"/></svg>
         </button>
