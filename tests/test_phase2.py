@@ -8,6 +8,7 @@ real data/ directory is never touched and CI needs no network.
 """
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import time
@@ -19,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app import db, policy, risk  # noqa: E402
+from app import db, policy, risk, sensors  # noqa: E402
 from app.approval import ApprovalQueue  # noqa: E402
 from app.proactive import ProactiveEngine  # noqa: E402
 from tests.fake_llm import FakeLLM  # noqa: E402
@@ -165,6 +166,69 @@ class PolicyTest(Base):
     def test_unknown_action_defaults_to_tier2(self):
         self.assertEqual(policy.tier_of("invented_action"), policy.TIER2)
 
+    def test_mold_candidates_include_the_purifier(self):
+        e = self._engine()
+        e.sensors.apply_scenario("mold")
+        snap = e.sensors.snapshot()
+        r = risk.mold_risk(snap, e.sensors.history)
+        cands = {c.kind: c for c in policy.candidates(r, snap)}
+        self.assertEqual(cands["purifier_on"].tier, policy.TIER1)
+        self.assertEqual(cands["purifier_on"].device_id, "purifier")
+
+    def test_whitelist_is_exactly_what_the_rules_can_propose(self):
+        """A whitelist entry no rule can produce is a capability the code claims
+        and does not have. This keeps the table and `candidates()` in step."""
+        produced = set()
+        for scenario in ("mold", "oven", "oven_running"):
+            e = self._engine()
+            e.sensors.apply_scenario(scenario)
+            snap = e.sensors.snapshot()
+            for r in risk.evaluate(snap, e.sensors.history):
+                produced |= {c.kind for c in policy.candidates(r, snap)}
+        self.assertEqual(set(policy.ACTION_TIERS) - produced, set())
+        self.assertEqual(produced - set(policy.ACTION_TIERS), set())
+
+
+# ---------------------------------------------------------------- calendar input
+
+class CalendarInputTest(Base):
+    def test_calendar_is_read_from_a_local_json_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                         encoding="utf-8") as f:
+            json.dump([{"title": "Dinner bake", "start": "2030-01-01T18:00",
+                        "end": "2030-01-01T19:00"}], f)
+            path = Path(f.name)
+        try:
+            got = sensors.SensorSimulator._load_calendar(path)
+        finally:
+            path.unlink()
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["title"], "Dinner bake")
+
+    def test_missing_or_broken_calendar_file_is_an_empty_day(self):
+        self.assertEqual(sensors.SensorSimulator._load_calendar(
+            Path("does-not-exist.json")), [])
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                         encoding="utf-8") as f:
+            f.write("{not json")
+            path = Path(f.name)
+        try:
+            self.assertEqual(sensors.SensorSimulator._load_calendar(path), [])
+        finally:
+            path.unlink()
+
+    def test_calendar_entry_drives_the_thermal_index(self):
+        e = self._engine()
+        e.sensors.apply_scenario("idle")
+        now = datetime.now()
+        e.sensors.calendar = [{"title": "Dinner bake",
+                               "start": (now + timedelta(minutes=20)).isoformat(
+                                   timespec="minutes"),
+                               "end": ""}]
+        r = risk.thermal_risk(e.sensors.snapshot(), e.sensors.history, now)
+        self.assertIsNotNone(r)          # load that has not arrived yet
+        self.assertIsNotNone(r.drivers["oven_scheduled_in_min"])
+
 
 # ---------------------------------------------------------------- approvals
 
@@ -208,6 +272,37 @@ class ProactiveNoLLMTest(Base):
         self.assertIn("power", applied.get("dehumidifier", []))
         self.assertEqual(e.approvals.pending(), [])  # nothing to ask about
         self.assertEqual(out["events"][0]["type"], "intervened")
+
+    def test_tier2_question_is_plain_and_names_the_deadline(self):
+        """The fail-safe only works if the question says how long the user has."""
+        e = self._engine()
+        e.sensors.apply_scenario("oven")
+        e.tick()
+        q = e.approvals.pending()[0].question
+        self.assertNotIn("/100", q)
+        self.assertIn("5 minutes", q)
+        self.assertIn("yes or no", q.lower())
+
+    def test_tier1_report_is_plain_language(self):
+        """The sentence a senior reads must not contain an index score.
+
+        "Mold risk 82/100 on the washer drum (90% humidity, predicted 90% in
+        30 min)" is a report for the spec. The person the product exists for
+        gets a sentence about their washing machine.
+        """
+        e = self._engine()
+        e.sensors.apply_scenario("mold")
+        e.tick()
+        body = [m for m in db.recent_messages(20) if m["role"] == "system"][-1]
+        text = body["content"]
+        self.assertNotIn("/100", text)
+        self.assertNotIn("predicted", text)
+        self.assertIn("washing machine", text.lower())
+        self.assertIn("started", text)          # past tense: the action is done
+        # The number is not lost — it moved into the payload, where the audit
+        # trail and the specification can still see it.
+        self.assertEqual(body["payload"]["score"], round(body["payload"]["score"], 1))
+        self.assertIn("/100", body["payload"]["headline"])
 
     def test_thermal_scenario_executes_tier1_and_asks_tier2(self):
         e = self._engine()
@@ -286,8 +381,7 @@ class ProactiveLLMTest(Base):
 
     def test_llm_subset_is_respected(self):
         with FakeLLM() as fake:
-            fake.prose_reply = ('{"chosen": [{"kind": "ventilate_washer", '
-                                '"reason": "drum is wet"}], "note": "drum drying"}')
+            fake.prose_reply = '{"chosen": ["ventilate_washer"]}'
             e = self._engine_llm(fake)
             e.sensors.apply_scenario("mold")
             e.tick()
@@ -299,12 +393,27 @@ class ProactiveLLMTest(Base):
 
     def test_llm_abstention_does_nothing(self):
         with FakeLLM() as fake:
-            fake.prose_reply = ('{"chosen": [], "note": "trend is flat, drum is drying"}')
+            fake.prose_reply = '{"chosen": []}'
             e = self._engine_llm(fake)
             e.sensors.apply_scenario("mold")
             e.tick()
             self.assertEqual(self.adapter.applied, [])
             self.assertEqual(e.approvals.pending(), [])
+
+    def test_llm_missing_chosen_key_is_not_an_abstention(self):
+        # An empty list is a decision; a response we cannot read is not. The
+        # second must fall back to the rule default, or a garbled answer would
+        # quietly silence the house.
+        with FakeLLM() as fake:
+            fake.prose_reply = '{"note": "I think it is fine"}'
+            e = self._engine_llm(fake)
+            e.sensors.apply_scenario("mold")
+            e.tick()
+            applied = {}
+            for dev, acts in self.adapter.applied:
+                applied.setdefault(dev, []).extend(a["action"] for a in acts)
+            self.assertIn("ventilate", applied.get("washer", []))
+            self.assertIn("power", applied.get("dehumidifier", []))
 
     def test_llm_garbage_falls_back_to_rule_default(self):
         with FakeLLM() as fake:
@@ -320,7 +429,7 @@ class ProactiveLLMTest(Base):
 
     def test_llm_choosing_only_tier1_skips_the_question(self):
         with FakeLLM() as fake:
-            fake.prose_reply = '{"chosen": [{"kind": "ventilate_kitchen"}], "note": "exhaust the heat"}'
+            fake.prose_reply = '{"chosen": ["ventilate_kitchen"]}'
             e = self._engine_llm(fake)
             e.sensors.apply_scenario("oven")
             e.tick()
