@@ -1,724 +1,799 @@
-/* Mobile-first app shell. Deep blue field, translucent cards, green for "on" --
-   the layout follows the reference app: room tabs, a summary row, a two-column
-   device grid, and a bottom tab bar. */
+/* Home Agent — senior-first interface.
+
+Design rules this file obeys, in order of importance:
+1. Type is large. Body 18px, headings 24px+, temperatures 34px. Nothing that
+   matters is smaller than 15px, ever.
+2. Touch targets are large. Nothing tappable is under 56px tall.
+3. Contrast is high. Near-black on warm white; colour is never the only signal.
+4. One primary action per screen. The talk button is permanent; the answer
+   buttons, when they appear, are the biggest things on the page.
+
+Light theme throughout: this is a screen an elderly household reads across a
+room, not a dashboard a developer squints at.
+*/
 
 :root {
-  --bg-top: #1d4468;
-  --bg-bottom: #0a1a2b;
-  --card: rgba(255, 255, 255, .075);
-  --card-line: rgba(255, 255, 255, .10);
-  --card-on: #f3f6f4;
-  --ink: #ffffff;
-  --ink-dim: rgba(255, 255, 255, .58);
-  --ink-faint: rgba(255, 255, 255, .38);
-  --ink-dark: #16202a;
-  --ink-dark-dim: #5d6b74;
-  --green: #22c55e;
-  --green-deep: #16a34a;
-  --radius: 18px;
+  --bg: #f6f4ef;
+  --card: #ffffff;
+  --ink: #17202a;
+  --ink-dim: #5b6572;
+  --ink-faint: #8a93a0;
+  --line: #e4ded2;
+  --blue: #1f6feb;
+  --blue-ink: #0b4fbf;
+  --green: #1a7f37;
+  --green-bg: #e7f4ea;
+  --red: #c62828;
+  --red-bg: #fdecec;
+  --amber: #9a6200;
+  --amber-bg: #fff6e3;
+  --shadow: 0 1px 2px rgba(23, 32, 42, .06), 0 4px 14px rgba(23, 32, 42, .06);
 }
 
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+* { box-sizing: border-box; }
 
-html, body {
-  margin: 0;
-  height: 100%;
-  background: #0a1a2b;
-}
+html { font-size: 18px; height: 100%; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-               "Microsoft YaHei", Roboto, sans-serif;
+  margin: 0;
+  background: var(--bg);
   color: var(--ink);
-  -webkit-font-smoothing: antialiased;
-  display: flex;
-  justify-content: center;
+  font: 400 1rem/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  -webkit-text-size-adjust: 100%;
+  /* The page itself never scrolls; each view scrolls inside the shell.
+     A scrolling document is what made a focused input jump to the top of the
+     transcript: the browser scrolls the nearest scrollable ancestor to reveal
+     the field, and a field in a fixed bottom bar has nowhere sane to be
+     revealed to. With the document locked, that scroll cannot happen. */
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
-svg { fill: none; stroke: currentColor; stroke-width: 1.6;
-      stroke-linecap: round; stroke-linejoin: round; }
+button { font: inherit; color: inherit; }
 
-.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.sprite { display: none; }
 
-/* ---------- shell ---------- */
-
-.phone {
-  position: relative;
-  width: 100%;
-  max-width: 430px;
+.app {
+  max-width: 600px;
+  margin: 0 auto;
+  /* The shell fills the *visible* viewport, so the talk bar sits on the bottom
+     edge and the transcript gets the space in between. 100dvh follows the phone
+     keyboard; 100vh does not, and that mismatch is what used to hide the last
+     message behind the buttons. */
+  height: 100vh;
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(168deg, var(--bg-top) 0%, #12324f 42%, var(--bg-bottom) 100%);
-  overflow: hidden;
+  min-height: 0;
+  padding: 0;
 }
 
-@media (min-width: 700px) {
-  body { align-items: center; background: #07131f; padding: 24px 0; }
-  .phone {
-    height: min(920px, calc(100dvh - 48px));
-    border-radius: 30px;
-    box-shadow: 0 30px 80px rgba(0, 0, 0, .55);
-    border: 1px solid rgba(255, 255, 255, .07);
-  }
-}
-
-/* ---------- top bar ---------- */
-
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 18px 16px 10px;
-  flex: 0 0 auto;
-}
-
-.rooms {
-  display: flex;
-  /* Five rooms plus "All" do not fit a 390px phone at 20px, and the last tab
-     ends up half visible — which reads as a broken layout rather than as
-     something to scroll. 13px fits them, and the row still scrolls if a house
-     ever has more rooms. */
-  gap: 13px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  flex: 1;
-  /* A flex item's min-width is auto, so this row keeps its full content width
-     and pushes the page wider than the viewport; .phone then clips the right
-     edge instead of scrolling it. */
-  min-width: 0;
-  padding-bottom: 2px;
-}
-.rooms::-webkit-scrollbar { display: none; }
-
-.rooms button {
-  background: none;
-  border: 0;
-  padding: 4px 0 7px;
-  font: inherit;
-  font-size: 14.5px;
-  color: var(--ink-dim);
-  white-space: nowrap;
-  position: relative;
-  cursor: pointer;
-}
-.rooms button.active { color: var(--ink); font-weight: 500; }
-.rooms button.active::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 0;
-  width: 20px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--ink);
-}
-
-.backend {
-  flex: 0 0 auto;
-  font-size: 10.5px;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-  border: 1px solid rgba(255, 255, 255, .13);
-  border-radius: 20px;
-  padding: 3px 8px;
-}
-
-/* The build stamp sits beside the backend chip, quieter than it: it answers
-   "is this the same code I just changed?" and nothing else. */
-.build {
-  flex: 0 0 auto;
-  font-size: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: .02em;
-  color: var(--ink-faint);
-  opacity: .7;
-  padding: 3px 0 3px 6px;
-}
-.build:empty { display: none; }
-
-/* ---------- summary ---------- */
-
-.summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 9px;
-  padding: 4px 16px 16px;
-  flex: 0 0 auto;
-}
-
-.tile {
-  background: var(--card);
-  border: 1px solid var(--card-line);
-  border-radius: 14px;
-  padding: 11px 8px 9px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-.tile .tile-icon { width: 17px; height: 17px; color: var(--ink-dim); margin-bottom: 3px; }
-.tile .tile-value { font-size: 17px; font-weight: 500; letter-spacing: -.01em; }
-.tile .tile-label { font-size: 10.5px; color: var(--ink-faint); }
-
-/* ---------- views ---------- */
-
-.views { flex: 1 1 auto; min-height: 0; display: flex; }
+/* Every view is its own scroll container. The old layout let the document
+   scroll, which meant the fixed bars floated over the content and nothing
+   agreed on where the bottom was. */
 .view {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: 0 16px 16px;
-  scrollbar-width: none;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 18px 16px 10px;
 }
-.view::-webkit-scrollbar { display: none; }
-.view[hidden] { display: none; }
+.view[hidden] { display: none !important; }
 
-/* ---------- device grid ---------- */
+/* ---------- masthead ---------- */
 
-.grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 11px;
-}
-
-.card {
-  background: var(--card);
-  border: 1px solid var(--card-line);
-  border-radius: var(--radius);
-  padding: 13px 13px 12px;
-  min-height: 108px;
+.masthead {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  cursor: pointer;
-  transition: transform .12s ease, background .15s ease;
+  gap: 10px;
+  padding: 6px 2px 14px;
 }
-.card:active { transform: scale(.975); }
-
-.card.on {
-  background: var(--card-on);
-  border-color: transparent;
-  color: var(--ink-dark);
-}
-
-.card.offline { opacity: .45; }
-
-.card-top { display: flex; align-items: flex-start; justify-content: space-between; }
-
-.dev-icon { width: 27px; height: 27px; color: var(--ink); opacity: .92; }
-.card.on .dev-icon { color: #2b3a44; }
-
-.card h3 {
+.masthead h1 {
   margin: 0;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.3;
+  font-size: 1.55rem;
+  font-weight: 700;
   letter-spacing: -.01em;
 }
-.card p {
-  margin: 3px 0 0;
-  font-size: 11.5px;
+.stamp {
+  margin: 0;
+  font-size: .68rem;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- status: the one thing the house has to say ---------- */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+.status-icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  padding: 8px;
+  border-radius: 50%;
+  background: var(--green-bg);
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.status[data-tone="ask"] .status-icon { background: var(--amber-bg); stroke: var(--amber); }
+.status strong {
+  display: block;
+  font-size: 1.2rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.status span {
+  display: block;
+  margin-top: 2px;
+  font-size: .82rem;
   color: var(--ink-dim);
+}
+
+/* ---------- the ask: Tier-2, waiting for an answer ---------- */
+
+/* The house's last answer, kept on screen until the next one. A reply that
+   disappears after 2.6 s is not an answer for someone who reads slowly. */
+.reply {
+  margin-top: 14px;
+  background: #eef4ff;
+  border: 2px solid #b9d2f7;
+  border-radius: 22px;
+  padding: 18px;
+}
+.reply-kicker {
+  margin: 0 0 8px;
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--blue-ink);
+}
+.reply-text {
+  margin: 0;
+  font-size: 1.32rem;
+  font-weight: 600;
+  line-height: 1.42;
+  white-space: pre-line;
+}
+.reply.pending .reply-text {
+  color: var(--ink-dim);
+  font-weight: 500;
+  font-style: italic;
+}
+
+/* A placeholder in the chat log while the agent is working. */
+.msg.pending {
+  opacity: .55;
+  font-style: italic;
+}
+
+.ask {
+  margin-top: 14px;
+  background: var(--amber-bg);
+  border: 2px solid #eec97e;
+  border-radius: 22px;
+  padding: 20px 18px;
+}
+.ask-kicker {
+  margin: 0 0 6px;
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.ask-question {
+  margin: 0 0 16px;
+  font-size: 1.22rem;
+  font-weight: 650;
   line-height: 1.35;
 }
-.card.on p { color: var(--ink-dark-dim); }
-
-.pwr {
-  width: 33px;
-  height: 33px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, .16);
-  background: rgba(255, 255, 255, .06);
-  color: var(--ink-dim);
+.ask-answers {
   display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition: background .15s ease, color .15s ease;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
-.pwr svg { width: 16px; height: 16px; stroke-width: 1.8; }
-.pwr.on { background: var(--green); border-color: transparent; color: #fff; }
-.card.on .pwr:not(.on) { border-color: rgba(0, 0, 0, .14); background: transparent; color: #8493a0; }
+.answer {
+  min-height: 76px;
+  border-radius: 18px;
+  border: 2px solid transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.answer svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.answer span { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.answer small { font-size: .68rem; font-weight: 600; opacity: .75; }
+.answer.yes { background: var(--green); color: #fff; }
+.answer.no { background: var(--card); color: var(--red); border-color: var(--red); }
+.answer:active { transform: scale(.98); }
+.ask-clock {
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: .8rem;
+  color: var(--amber);
+  font-variant-numeric: tabular-nums;
+}
 
-/* ---------- section headings ---------- */
+/* ---------- section heads ---------- */
 
 .sec-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  padding: 20px 2px 10px;
+  padding: 22px 4px 10px;
 }
-.sec-head h2 { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink-dim); }
+.sec-head h2 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--ink-dim);
+  letter-spacing: .01em;
+}
 
 /* ---------- quick actions ---------- */
 
-.scenes {
+.quick {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 9px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
 }
-
-.scene {
+.quick button {
+  min-height: 84px;
   background: var(--card);
-  border: 1px solid var(--card-line);
-  border-radius: 15px;
-  padding: 12px 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
-  color: var(--ink);
-  font: inherit;
-  font-size: 11.5px;
+  justify-content: center;
+  gap: 6px;
   cursor: pointer;
-  transition: transform .12s ease, background .15s ease;
-}
-.scene:active { transform: scale(.96); background: rgba(255, 255, 255, .14); }
-.scene svg { width: 21px; height: 21px; color: var(--ink-dim); }
-.scene span { line-height: 1.25; text-align: center; }
-
-/* ---------- toast ---------- */
-
-.toast {
-  position: absolute;
-  left: 50%;
-  bottom: calc(92px + env(safe-area-inset-bottom));
-  transform: translateX(-50%);
-  z-index: 30;
-  max-width: 80%;
-  background: #14324c;
-  border: 1px solid rgba(255, 255, 255, .16);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .45);
-  color: var(--ink);
-  font-size: 12.5px;
-  line-height: 1.45;
-  padding: 10px 15px;
-  border-radius: 13px;
+  font-size: .8rem;
+  font-weight: 600;
   text-align: center;
-  animation: fade .18s ease;
-  pointer-events: none;
+  padding: 8px 6px;
 }
-@keyframes fade { from { opacity: 0; transform: translate(-50%, 6px); }
-                  to   { opacity: 1; transform: translate(-50%, 0); } }
-
-/* ---------- schedule ---------- */
-
-.view-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 2px 12px;
+.quick button svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
-.view-head h2 { margin: 0; font-size: 16px; font-weight: 500; }
-.count {
-  font-size: 11px;
-  color: var(--ink-faint);
-  border: 1px solid rgba(255, 255, 255, .13);
-  border-radius: 20px;
-  padding: 1px 7px;
-  margin-left: 6px;
-  vertical-align: 2px;
-}
-.ghost {
-  background: none;
-  border: 0;
-  color: var(--ink-faint);
-  font: inherit;
-  font-size: 12.5px;
-  cursor: pointer;
-  padding: 6px;
-}
+.quick button:active { background: #eef4ff; }
 
-.jobs { display: flex; flex-direction: column; gap: 9px; }
+/* ---------- rooms ---------- */
 
-.job {
-  background: var(--card);
-  border: 1px solid var(--card-line);
-  border-radius: 15px;
-  padding: 13px 14px;
-  display: flex;
-  align-items: center;
+.rooms {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
-.job-main { flex: 1; min-width: 0; }
-.job-main strong { display: block; font-size: 13.5px; font-weight: 500; line-height: 1.35; }
-.job-main span { font-size: 11.5px; color: var(--ink-dim); }
-.job.disabled { opacity: .5; }
-.job.next { cursor: pointer; }
-.job-icon { width: 19px; height: 19px; flex: 0 0 auto; color: var(--ink-faint); }
-.job .del {
-  background: none;
-  border: 0;
-  color: var(--ink-faint);
-  font-size: 20px;
-  line-height: 1;
-  padding: 4px 6px;
+.room {
+  background: var(--card);
+  border: 1.5px solid var(--line);
+  border-radius: 20px;
+  padding: 14px;
   cursor: pointer;
-}
-
-.empty {
-  color: var(--ink-faint);
-  font-size: 12.5px;
-  text-align: center;
-  padding: 40px 12px;
-  line-height: 1.6;
-}
-
-.hint {
-  margin: 4px 2px 0;
-  color: var(--ink-faint);
-  font-size: 11.5px;
-  line-height: 1.6;
-}
-
-/* ---------- chat ---------- */
-
-.chat-view { display: flex; flex-direction: column; padding-bottom: 0; }
-
-/* How it decides. Sits above the transcript because the transcript is the
-   evidence: in agent mode each reply carries the steps behind it. */
-.mode-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 2px 0 8px;
-  min-width: 0;
-}
-.mode-switch {
-  display: flex;
-  flex: 0 0 auto;
-  padding: 2px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, .08);
-  border: 1px solid var(--card-line);
-}
-.mode-switch button {
-  padding: 5px 11px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ink-dim);
-  font: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
-}
-.mode-switch button.active {
-  background: var(--ink);
-  color: var(--ink-dark);
-  font-weight: 500;
-}
-.mode-note {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 10.5px;
-  line-height: 1.35;
-  color: var(--ink-faint);
-}
-
-/* The steps behind a reply, collapsed by default — it is evidence, not prose. */
-.msg .trace {
-  margin: 7px 0 0;
-  padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, .12);
-}
-.msg .trace summary {
-  font-size: 11px;
-  color: var(--ink-faint);
-  cursor: pointer;
-  list-style: none;
-}
-.msg .trace summary::-webkit-details-marker { display: none; }
-.msg .trace summary::after { content: " \203A"; }
-.msg .trace ol {
-  margin: 5px 0 0;
-  padding-left: 15px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--ink-dim);
-}
-.msg .trace li { margin-bottom: 2px; }
-/* The reading the model turned down. Muted, because it is what did not happen. */
-.msg .trace li.offer { color: var(--ink-faint); font-style: italic; }
-
-.chat {
-  flex: 1;
-  overflow-y: auto;
+  text-align: left;
+  min-height: 118px;
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  padding: 4px 0 12px;
-  scrollbar-width: none;
+  justify-content: space-between;
 }
-.chat::-webkit-scrollbar { display: none; }
-
-.msg {
-  max-width: 84%;
-  padding: 9px 13px;
-  border-radius: 15px;
-  font-size: 13.5px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
+.room.active { border-color: var(--blue); background: #f2f7ff; }
+.room h3 {
+  margin: 0;
+  font-size: .95rem;
+  font-weight: 700;
 }
-/* When this turn happened, and — only when it matters — that the reply was
-   written by a build that no longer runs. The tag is not decoration: it is
-   the only thing that tells an old answer from a fresh one. */
-.msg .stamp {
-  display: block;
-  margin-top: 5px;
-  font-size: 10px;
+.room .temp {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
-  letter-spacing: .02em;
-  opacity: .62;
 }
-.msg.user .stamp { color: #eaf7ee; }
-.msg.assistant .stamp { color: var(--ink-faint); }
-.msg .stamp .stale { color: #e0a23c; opacity: 1; font-weight: 600; }
-.msg.user {
-  align-self: flex-end;
-  background: var(--green-deep);
-  color: #fff;
-  border-bottom-right-radius: 5px;
-}
-.msg.assistant {
-  align-self: flex-start;
-  background: rgba(255, 255, 255, .10);
-  border: 1px solid var(--card-line);
-  border-bottom-left-radius: 5px;
-}
-.msg.system {
-  align-self: center;
-  max-width: 92%;
-  background: none;
-  border: 1px dashed rgba(255, 255, 255, .16);
+.room .meta {
+  font-size: .78rem;
   color: var(--ink-dim);
-  font-size: 11.5px;
-  text-align: center;
-  border-radius: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.room .meta svg {
+  width: 14px; height: 14px;
+  fill: none; stroke: var(--ink-dim);
+  stroke-width: 2; stroke-linecap: round;
 }
 
-.chips {
+/* ---------- devices ---------- */
+
+.devices {
   display: flex;
-  gap: 7px;
-  overflow-x: auto;
-  padding: 2px 0 10px;
-  scrollbar-width: none;
-  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 12px;
 }
-.chips::-webkit-scrollbar { display: none; }
-.chips button {
-  flex: 0 0 auto;
-  background: rgba(255, 255, 255, .08);
-  border: 1px solid var(--card-line);
-  color: var(--ink-dim);
-  font: inherit;
-  font-size: 12px;
-  padding: 7px 12px;
+.device {
+  background: var(--card);
+  border: 1px solid var(--line);
   border-radius: 20px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.chips button:active { background: rgba(255, 255, 255, .16); }
-
-.composer {
-  flex: 0 0 auto;
+  padding: 14px 16px;
   display: flex;
-  gap: 9px;
-  padding: 0 0 12px;
+  align-items: center;
+  gap: 14px;
+  box-shadow: var(--shadow);
 }
-.composer input {
-  flex: 1;
-  background: rgba(255, 255, 255, .08);
-  border: 1px solid var(--card-line);
-  border-radius: 22px;
-  padding: 12px 16px;
-  color: var(--ink);
-  font: inherit;
-  font-size: 14px;
-  outline: none;
-  min-width: 0;
-}
-.composer input::placeholder { color: var(--ink-faint); }
-.composer input:focus { border-color: rgba(255, 255, 255, .28); }
-.composer button {
-  width: 44px;
-  height: 44px;
+.device .dev-icon {
+  width: 46px;
+  height: 46px;
   flex: 0 0 auto;
-  border: 0;
+  padding: 10px;
+  border-radius: 14px;
+  background: #eef1f5;
+  fill: none;
+  stroke: var(--ink-dim);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.device.on .dev-icon { background: #e3effe; stroke: var(--blue-ink); }
+.device .dev-text { flex: 1; min-width: 0; }
+.device h3 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 650;
+}
+.device p {
+  margin: 2px 0 0;
+  font-size: .82rem;
+  color: var(--ink-dim);
+}
+.device .pwr {
+  width: 60px;
+  height: 60px;
+  flex: 0 0 auto;
   border-radius: 50%;
-  background: var(--green);
-  color: #fff;
+  border: 2px solid var(--line);
+  background: #f4f5f7;
   display: grid;
   place-items: center;
   cursor: pointer;
 }
+.device .pwr svg {
+  width: 24px; height: 24px;
+  fill: none; stroke: var(--ink-dim);
+  stroke-width: 2; stroke-linecap: round;
+}
+.device.on .pwr { background: var(--blue); border-color: var(--blue); }
+.device.on .pwr svg { stroke: #fff; }
+.device.offline { opacity: .55; }
 
-/* Voice: the mic is a secondary channel, so it is quieter than send. The
-   listening state is the one moment it deserves the full-strength colour. */
-.composer .mic {
-  background: rgba(255, 255, 255, .08);
-  border: 1px solid var(--card-line);
+/* ---------- schedule ---------- */
+
+.jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.job {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.job .job-main { flex: 1; min-width: 0; }
+.job strong { display: block; font-size: .98rem; font-weight: 650; }
+.job span { font-size: .8rem; color: var(--ink-dim); }
+.job .del {
+  width: 48px; height: 48px;
+  border: 0; border-radius: 14px;
+  background: var(--red-bg); color: var(--red);
+  font-size: 1.3rem; cursor: pointer;
+}
+.job.disabled { opacity: .55; }
+.empty {
+  background: var(--card);
+  border: 1px dashed var(--line);
+  border-radius: 18px;
+  padding: 22px 16px;
+  text-align: center;
   color: var(--ink-dim);
+  font-size: .9rem;
+  margin: 0;
 }
-.composer .mic.listening {
-  background: var(--red, #e5484d);
-  border-color: transparent;
-  color: #fff;
-  animation: mic-pulse 1.2s ease-in-out infinite;
+
+/* ---------- assistant ---------- */
+
+.assistant-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-@keyframes mic-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, .45); }
-  50% { box-shadow: 0 0 0 6px rgba(229, 72, 77, 0); }
+.mode-switch {
+  display: flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: #e9e6de;
 }
-.composer .lang {
-  width: auto;
-  min-width: 44px;
-  padding: 0 10px;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, .08);
-  border: 1px solid var(--card-line);
+.mode-switch button {
+  border: 0;
+  background: none;
+  border-radius: 999px;
+  padding: 7px 13px;
+  font-size: .78rem;
+  font-weight: 650;
   color: var(--ink-dim);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .04em;
   cursor: pointer;
 }
-.composer button svg { width: 19px; height: 19px; }
-
-/* Read-aloud toggle. Off is the default: a phone that talks unbidden is a
-   phone people stop carrying. */
+.mode-switch button.active { background: var(--card); color: var(--ink); box-shadow: var(--shadow); }
+.mode-note {
+  margin: 0 0 10px;
+  font-size: .78rem;
+  color: var(--ink-faint);
+  padding: 0 2px;
+}
 .tts {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex: 0 0 auto;
-  border: 1px solid var(--card-line);
+  border: 1.5px solid var(--line);
+  background: var(--card);
   border-radius: 999px;
-  padding: 5px 11px;
-  font-size: 12px;
+  padding: 7px 13px;
+  font-size: .78rem;
+  font-weight: 650;
+  color: var(--ink-dim);
+  cursor: pointer;
 }
-.tts svg { width: 15px; height: 15px; }
-.tts.active { color: var(--green); border-color: rgba(52, 199, 123, .45); }
+.tts svg {
+  width: 16px; height: 16px;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.8; stroke-linecap: round;
+}
+.tts.active { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 2px 12px;
+}
+
+/* The assistant is the one view that must not scroll as a whole: the
+   transcript scrolls, the suggestions and the talk bar stay put. */
+#view-assistant {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+#view-assistant .chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+#view-assistant .chips { flex: 0 0 auto; }
+.msg {
+  max-width: 86%;
+  padding: 13px 16px;
+  border-radius: 20px;
+  font-size: 1rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.msg.user {
+  align-self: flex-end;
+  background: var(--blue);
+  color: #fff;
+  border-bottom-right-radius: 6px;
+}
+.msg.assistant, .msg.system {
+  align-self: flex-start;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 6px;
+}
+.msg.system { background: var(--amber-bg); border-color: #eec97e; }
+.msg .stamp {
+  display: block;
+  margin-top: 6px;
+  font-size: .66rem;
+  color: var(--ink-faint);
+}
+.msg.user .stamp { color: rgba(255, 255, 255, .7); }
+.msg details {
+  margin-top: 8px;
+  border-top: 1px dashed var(--line);
+  padding-top: 6px;
+}
+.msg summary {
+  font-size: .74rem;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.msg details ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: .8rem;
+  color: var(--ink-dim);
+}
+.msg details li { margin-bottom: 4px; }
+.msg details li.offer { list-style: "💬 "; }
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+.chips button {
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  border-radius: 999px;
+  padding: 9px 15px;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.chips button:active { background: #eef4ff; }
+
+/* ---------- talk bar (permanent) ---------- */
+
+.talkbar {
+  flex: 0 0 auto;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  padding: 10px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.talk {
+  min-height: 62px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--blue);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(31, 111, 235, .32);
+}
+.talk svg {
+  width: 28px; height: 28px;
+  fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round;
+}
+.talk span { display: flex; align-items: baseline; gap: 8px; }
+.talk small { font-size: .8rem; font-weight: 600; opacity: .85; }
+.talk.listening { background: var(--red); box-shadow: 0 6px 18px rgba(198, 40, 40, .32); }
+
+.composer {
+  display: flex;
+  gap: 8px;
+}
+.composer input {
+  flex: 1;
+  min-width: 0;
+  background: var(--card);
+  border: 1.5px solid var(--line);
+  border-radius: 18px;
+  padding: 13px 16px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 1rem;
+  outline: none;
+}
+.composer input:focus { border-color: var(--blue); }
+.composer .lang {
+  min-width: 52px;
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  border-radius: 18px;
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.composer .send {
+  width: 54px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--blue);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.composer .send svg {
+  width: 22px; height: 22px;
+  fill: none; stroke: #fff;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
 
 /* ---------- tab bar ---------- */
 
 .tabbar {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: 7px 0 max(8px, env(safe-area-inset-bottom));
-  background: rgba(6, 16, 26, .55);
-  backdrop-filter: blur(14px);
-  border-top: 1px solid rgba(255, 255, 255, .07);
+  grid-template-columns: repeat(3, 1fr);
+  background: var(--card);
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
 }
-
-.tab {
-  background: none;
+.tabbar .tab {
   border: 0;
-  color: var(--ink-faint);
-  font: inherit;
-  font-size: 10.5px;
+  background: none;
+  min-height: 72px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 3px;
-  padding: 5px 0 3px;
+  font-size: .76rem;
+  font-weight: 650;
+  color: var(--ink-faint);
   cursor: pointer;
 }
-.tab svg { width: 21px; height: 21px; }
-.tab.active { color: var(--ink); }
+.tabbar .tab svg {
+  width: 26px; height: 26px;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+}
+.tabbar .tab.active { color: var(--blue-ink); }
+
+/* ---------- toast ---------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(160px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: #fff;
+  border-radius: 16px;
+  padding: 14px 22px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.4;
+  z-index: 40;
+  max-width: 86%;
+  text-align: center;
+}
 
 /* ---------- device sheet ---------- */
 
 .sheet-scrim {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, .5);
-  z-index: 20;
+  background: rgba(23, 32, 42, .38);
+  z-index: 50;
 }
 .sheet {
   position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 0;
-  width: 100%;
-  max-width: 430px;
-  z-index: 21;
-  background: #f3f6f4;
-  color: var(--ink-dark);
-  border-radius: 22px 22px 0 0;
-  padding: 8px 20px calc(24px + env(safe-area-inset-bottom));
-  animation: rise .22s ease;
+  left: 0; right: 0; bottom: 0;
+  max-width: 600px;
+  margin: 0 auto;
+  background: var(--card);
+  border-radius: 26px 26px 0 0;
+  padding: 10px 20px calc(26px + env(safe-area-inset-bottom));
+  z-index: 51;
 }
-@keyframes rise { from { transform: translate(-50%, 24px); opacity: .4; }
-                  to   { transform: translate(-50%, 0); opacity: 1; } }
-
 .sheet-grip {
-  width: 38px;
-  height: 4px;
-  border-radius: 4px;
-  background: #d3dad6;
-  margin: 4px auto 16px;
+  width: 44px; height: 5px;
+  border-radius: 3px;
+  background: var(--line);
+  margin: 4px auto 14px;
 }
-.sheet h2 { margin: 0 0 2px; font-size: 17px; font-weight: 500; }
-.sheet .sub { margin: 0 0 18px; font-size: 12.5px; color: var(--ink-dark-dim); }
-
+.sheet h2 { margin: 0; font-size: 1.3rem; }
+.sheet .sub { margin: 2px 0 18px; color: var(--ink-dim); font-size: .85rem; }
 .stepper {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  background: #e7ece9;
-  border-radius: 16px;
-  padding: 10px 14px;
-  margin-bottom: 12px;
+  justify-content: center;
+  gap: 22px;
+  margin: 6px 0 16px;
 }
 .stepper button {
-  width: 38px;
-  height: 38px;
+  width: 64px; height: 64px;
   border-radius: 50%;
-  border: 0;
-  background: #fff;
-  color: var(--ink-dark);
-  font-size: 21px;
-  line-height: 1;
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  font-size: 1.7rem;
   cursor: pointer;
 }
-.stepper button:disabled { opacity: .35; }
-.stepper .target { font-size: 22px; font-weight: 500; }
-
-.pills { display: flex; gap: 8px; margin-bottom: 16px; }
+.stepper .target {
+  font-size: 2.1rem;
+  font-weight: 700;
+  min-width: 110px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 18px;
+}
 .pills button {
-  flex: 1;
-  padding: 10px 0;
-  border-radius: 12px;
-  border: 1px solid #dde3df;
-  background: #fff;
-  color: var(--ink-dark-dim);
-  font: inherit;
-  font-size: 12.5px;
+  min-height: 52px;
+  padding: 0 20px;
+  border-radius: 16px;
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  font-weight: 650;
   cursor: pointer;
 }
-.pills button.active {
-  background: var(--green-deep);
-  border-color: var(--green-deep);
-  color: #fff;
-}
-
+.pills button.active { background: var(--blue); border-color: var(--blue); color: #fff; }
 .sheet-power {
   width: 100%;
-  padding: 14px;
-  border-radius: 15px;
+  min-height: 62px;
   border: 0;
-  background: #dde3df;
-  color: var(--ink-dark);
-  font: inherit;
-  font-size: 14.5px;
-  font-weight: 500;
+  border-radius: 18px;
+  background: var(--blue);
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 700;
   cursor: pointer;
 }
-.sheet-power.on { background: var(--green-deep); color: #fff; }
+.sheet-power.on { background: var(--red); }
+
+/* ---------- wide screens: keep the phone frame honest ---------- */
+
+@media (min-width: 640px) {
+  body { background: #ece8df; }
+  .app, .tabbar, .talkbar, .sheet {
+    border-left: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+  }
+}
+
+/* A laptop or a projector is the same audience, so the frame gets wider and
+   everything gets bigger — not just more space to fill. */
+@media (min-width: 1000px) {
+  html { font-size: 22px; }
+  .app, .talkbar, .tabbar, .sheet { max-width: 780px; }
+  .toast { max-width: 66%; }
+}

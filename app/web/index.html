@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0e2a47">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#f6f4ef">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Home Agent</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -38,23 +38,14 @@
     <path d="M4 4h16l-1.5 7h-13z"/>
     <path d="M12 11v6M8.5 20.5h7M9 17h6"/>
   </symbol>
-  <symbol id="i-mic" viewBox="0 0 24 24">
-    <rect x="9" y="3" width="6" height="11" rx="3"/>
-    <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/>
-  </symbol>
-  <symbol id="i-speaker" viewBox="0 0 24 24">
-    <path d="M4 9.5h3.5L12 6v12L7.5 14.5H4z"/>
-    <path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7.5 7.5 0 0 1 0 10"/>
-  </symbol>
   <symbol id="i-power" viewBox="0 0 24 24">
     <path d="M12 4.5v7"/>
     <path d="M7.6 7.2a7 7 0 1 0 8.8 0"/>
   </symbol>
-  <symbol id="i-devices" viewBox="0 0 24 24">
-    <rect x="3.5" y="3.5" width="7" height="7" rx="2"/>
-    <rect x="13.5" y="3.5" width="7" height="7" rx="2"/>
-    <rect x="3.5" y="13.5" width="7" height="7" rx="2"/>
-    <rect x="13.5" y="13.5" width="7" height="7" rx="2"/>
+  <symbol id="i-home" viewBox="0 0 24 24">
+    <path d="M4 11.5L12 4l8 7.5"/>
+    <path d="M6.5 10v9.5h11V10"/>
+    <path d="M10.5 19.5v-5h3v5"/>
   </symbol>
   <symbol id="i-clock" viewBox="0 0 24 24">
     <circle cx="12" cy="12" r="8.5"/>
@@ -67,8 +58,19 @@
   <symbol id="i-send" viewBox="0 0 24 24">
     <path d="M4 12l16-7-6 16-3-6z"/>
   </symbol>
-  <symbol id="i-chevron" viewBox="0 0 24 24">
-    <path d="M9 6l6 6-6 6"/>
+  <symbol id="i-mic" viewBox="0 0 24 24">
+    <rect x="9" y="3" width="6" height="11" rx="3"/>
+    <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/>
+  </symbol>
+  <symbol id="i-speaker" viewBox="0 0 24 24">
+    <path d="M4 9.5h3.5L12 6v12L7.5 14.5H4z"/>
+    <path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7.5 7.5 0 0 1 0 10"/>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 24 24">
+    <path d="M5 12.5l4.5 4.5L19 7.5"/>
+  </symbol>
+  <symbol id="i-x" viewBox="0 0 24 24">
+    <path d="M6 6l12 12M18 6L6 18"/>
   </symbol>
   <symbol id="i-temp" viewBox="0 0 24 24">
     <path d="M12 13.6V5a2.1 2.1 0 1 1 4.2 0v8.6a4.2 4.2 0 1 1-4.2 0z"/>
@@ -77,83 +79,114 @@
   <symbol id="i-drop" viewBox="0 0 24 24">
     <path d="M12 3.4c3.4 3.9 5.2 6.4 5.2 8.8a5.2 5.2 0 1 1-10.4 0c0-2.4 1.8-4.9 5.2-8.8z"/>
   </symbol>
-  <symbol id="i-bolt" viewBox="0 0 24 24">
-    <path d="M13.2 2.8L6 13.4h4.8L9.6 21.2 17.4 10.4h-5z"/>
-  </symbol>
 </svg>
 
-<div class="phone">
+<div class="app">
 
-  <header class="topbar">
-    <nav class="rooms" id="rooms" aria-label="Rooms"></nav>
-    <span class="backend" id="backend">Simulator</span>
-    <span class="build" id="build" title="Build answering this page"></span>
-  </header>
+  <!-- ================= HOME ================= -->
+  <section class="view" id="view-home">
+    <header class="masthead">
+      <h1>My Home</h1>
+      <p class="stamp" id="stamp"></p>
+    </header>
 
-  <section class="summary" id="summary"></section>
-
-  <main class="views">
-
-    <section class="view" id="view-devices">
-      <div class="grid" id="devices"></div>
-
-      <div class="sec-head"><h2>Quick actions</h2></div>
-      <div class="scenes" id="scenes"></div>
-
-      <div class="sec-head">
-        <h2>Next up</h2>
-        <button class="ghost" data-tab="jobs">All</button>
+    <!-- The one thing the house has to say, in plain words. -->
+    <div class="status" id="status">
+      <svg class="status-icon" viewBox="0 0 24 24"><use href="#i-home"/></svg>
+      <div>
+        <strong id="statusLine">Everything is fine.</strong>
+        <span id="statusDetail"></span>
       </div>
-      <div class="jobs" id="nextUp"></div>
-    </section>
+    </div>
 
-    <section class="view" id="view-jobs" hidden>
-      <div class="view-head">
-        <h2>Schedule <span class="count" id="jobCount">0</span></h2>
-        <button class="ghost" id="clearJobs">Clear all</button>
+    <!-- The house's last answer, kept on screen. A reply that vanishes after
+         two seconds is not an answer for someone who reads slowly. -->
+    <div class="reply" id="reply" hidden>
+      <p class="reply-kicker">The house says</p>
+      <p class="reply-text" id="replyText"></p>
+    </div>
+
+    <!-- A Tier-2 request waiting for an answer. The proposal's centrepiece:
+         big question, two big answers, a clock that is honest about running out. -->
+    <div class="ask" id="ask" hidden>
+      <p class="ask-kicker">The house is asking</p>
+      <p class="ask-question" id="askQuestion"></p>
+      <div class="ask-answers">
+        <button class="answer yes" id="askYes">
+          <svg viewBox="0 0 24 24"><use href="#i-check"/></svg>
+          <span>Yes<small>네</small></span>
+        </button>
+        <button class="answer no" id="askNo">
+          <svg viewBox="0 0 24 24"><use href="#i-x"/></svg>
+          <span>No<small>아니요</small></span>
+        </button>
       </div>
-      <div class="jobs" id="jobs"></div>
-    </section>
+      <p class="ask-clock" id="askClock"></p>
+    </div>
 
-    <section class="view chat-view" id="view-chat" hidden>
-      <div class="mode-bar">
+    <div class="sec-head"><h2>Quick actions</h2></div>
+    <div class="quick" id="quick"></div>
+
+    <div class="sec-head"><h2>Rooms</h2></div>
+    <div class="rooms" id="rooms"></div>
+
+    <div class="sec-head">
+      <h2 id="deviceHead">Devices</h2>
+    </div>
+    <div class="devices" id="devices"></div>
+  </section>
+
+  <!-- ================= SCHEDULE ================= -->
+  <section class="view" id="view-schedule" hidden>
+    <header class="masthead"><h1>Schedule</h1></header>
+    <div class="jobs" id="jobs"></div>
+  </section>
+
+  <!-- ================= ASSISTANT ================= -->
+  <section class="view" id="view-assistant" hidden>
+    <header class="masthead">
+      <h1>Assistant</h1>
+      <div class="assistant-tools">
         <div class="mode-switch" id="modeSwitch" role="group" aria-label="How it decides">
           <button type="button" data-agent-mode="cascade" aria-pressed="false">Cascade</button>
           <button type="button" data-agent-mode="agent" aria-pressed="false">Agent</button>
         </div>
-        <button type="button" id="tts" class="ghost tts" aria-pressed="false"
-                title="Read replies out loud">
+        <button type="button" id="tts" class="tts" aria-pressed="false" title="Read replies out loud">
           <svg viewBox="0 0 24 24"><use href="#i-speaker"/></svg>
           <span>Read aloud</span>
         </button>
-        <p class="mode-note" id="modeNote"></p>
       </div>
-      <div class="chat" id="chat"></div>
-      <div class="chips" id="chips"></div>
-      <form class="composer" id="composer">
-        <button type="button" id="mic" class="mic" aria-label="Voice input" aria-pressed="false">
-          <svg viewBox="0 0 24 24"><use href="#i-mic"/></svg>
-        </button>
-        <input id="input" type="text" autocomplete="off" placeholder="Ask me anything…">
-        <button type="button" id="lang" class="lang" title="Voice language">KO</button>
-        <button type="submit" aria-label="Send">
-          <svg viewBox="0 0 24 24"><use href="#i-send"/></svg>
-        </button>
-      </form>
-    </section>
+    </header>
 
-  </main>
+    <div class="chat" id="chat"></div>
+    <div class="chips" id="chips"></div>
+  </section>
 
-  <nav class="tabbar" id="tabbar">
-    <button class="tab active" data-tab="devices">
-      <svg viewBox="0 0 24 24"><use href="#i-devices"/></svg>
-      <span>Devices</span>
+  <!-- The talk button is permanent: for the household this is the app. -->
+  <div class="talkbar">
+    <button class="talk" id="mic">
+      <svg viewBox="0 0 24 24"><use href="#i-mic"/></svg>
+      <span>Talk<small>말하기</small></span>
     </button>
-    <button class="tab" data-tab="jobs">
+    <form class="composer" id="composer">
+      <input id="input" type="text" autocomplete="off" enterkeyhint="send" placeholder="Or type here…">
+      <button type="button" id="lang" class="lang" title="Voice language">EN</button>
+      <button type="submit" class="send" aria-label="Send">
+        <svg viewBox="0 0 24 24"><use href="#i-send"/></svg>
+      </button>
+    </form>
+  </div>
+
+  <nav class="tabbar">
+    <button class="tab active" data-tab="home">
+      <svg viewBox="0 0 24 24"><use href="#i-home"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="tab" data-tab="schedule">
       <svg viewBox="0 0 24 24"><use href="#i-clock"/></svg>
       <span>Schedule</span>
     </button>
-    <button class="tab" data-tab="chat">
+    <button class="tab" data-tab="assistant">
       <svg viewBox="0 0 24 24"><use href="#i-chat"/></svg>
       <span>Assistant</span>
     </button>
