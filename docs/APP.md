@@ -44,12 +44,13 @@ everything, including the quick actions and the chips:
 The switch posts to `/api/mode` and takes effect on the next message; `config.json`
 sets which one the app starts in.
 
-Beside the backend chip in the header there is a seven-character build stamp
+At the foot of the Home view there is a seven-character build stamp
 (`79a39aa`). It is a hash of `app/*.py` taken at import and served in
 `/api/snapshot`, so it names the process that is answering rather than the page
 that is asking. A tab left open overnight, a preview panel that never reloaded and
 a second server holding the port all look identical from the outside, and the
-wording of a reply is a poor way to tell them apart — twice it was not.
+wording of a reply is a poor way to tell them apart — twice it was not. It sits at
+the bottom of the screen because it is a version number, not a feature.
 
 The active tab is kept in the URL (`#home`, `#schedule`, `#assistant`), so a reload — or a
 relaunch from the home screen — lands where you left off instead of back on Home.

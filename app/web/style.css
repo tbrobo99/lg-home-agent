@@ -1,46 +1,74 @@
-/* Home Agent — senior-first interface.
+/* Proactive Senior Care & Comfort Agent — interface.
 
-Design rules this file obeys, in order of importance:
-1. Type is large. Body 18px, headings 24px+, temperatures 34px. Nothing that
-   matters is smaller than 15px, ever.
-2. Touch targets are large. Nothing tappable is under 56px tall.
-3. Contrast is high. Near-black on warm white; colour is never the only signal.
-4. One primary action per screen. The talk button is permanent; the answer
-   buttons, when they appear, are the biggest things on the page.
+Where the look comes from, and why:
 
-Light theme throughout: this is a screen an elderly household reads across a
-room, not a dashboard a developer squints at.
+- Toss (토스). The Korean standard for large-type mobile UI: white page, near-black
+  text, one accent colour, thin dividers, almost no shadow. It proves that "big
+  enough for an elderly reader" and "looks like a shipped product" are not in
+  conflict — the previous version traded one for the other.
+- LG ThinQ. The app this actually talks to. Its device rows are the shape a
+  household already knows: icon, name, state, one control on the right.
+- Mi Home (米家). Device density without clutter: filled tiles for a grid, hairline
+  rows for a list, no card inside a card.
+- iOS Settings / WeChat. Section labels above divided groups. This is what makes a
+  screen read as an app rather than as a landing page.
+
+Four rules, in priority order:
+
+1. Nothing tappable is under 52px; the answer buttons are the largest things on
+   any screen, because the whole product exists for the moment they appear.
+2. Body text never drops below 16px, and numbers are set larger than their labels.
+3. Colour is a signal, not decoration. Accent blue means "this is the action".
+   Green / amber / red mean house state. Everything else is neutral.
+4. No drop shadows on the page. Depth is expressed with a fill step and a hairline,
+   which is what real apps do and what generated templates do not.
 */
 
 :root {
-  --bg: #f6f4ef;
-  --card: #ffffff;
-  --ink: #17202a;
-  --ink-dim: #5b6572;
-  --ink-faint: #8a93a0;
-  --line: #e4ded2;
-  --blue: #1f6feb;
-  --blue-ink: #0b4fbf;
-  --green: #1a7f37;
-  --green-bg: #e7f4ea;
-  --red: #c62828;
-  --red-bg: #fdecec;
-  --amber: #9a6200;
-  --amber-bg: #fff6e3;
-  --shadow: 0 1px 2px rgba(23, 32, 42, .06), 0 4px 14px rgba(23, 32, 42, .06);
+  /* Surfaces */
+  --bg: #ffffff;
+  --surface: #f2f4f6;
+  --surface-press: #e5e8eb;
+  --line: #eceef1;
+  --line-strong: #dfe3e8;
+
+  /* Ink */
+  --ink: #191f28;
+  --ink-2: #4e5968;
+  --ink-3: #8b95a1;
+  --ink-4: #b0b8c1;
+
+  /* Signal */
+  --accent: #3182f6;
+  --accent-ink: #1b64da;
+  --accent-weak: #e8f3ff;
+
+  --green: #0b9b6d;
+  --green-weak: #e7f7f1;
+  --red: #e5484d;
+  --red-weak: #fdecec;
+  --amber: #a86500;
+  --amber-weak: #fff8ea;
+  --amber-line: #f2c879;
+
+  --radius-block: 16px;
+  --radius-control: 12px;
 }
 
 * { box-sizing: border-box; }
 
-html { font-size: 18px; height: 100%; }
+html { font-size: 17px; height: 100%; }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 400 1rem/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-        "Helvetica Neue", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font: 400 1rem/1.5 "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI",
+        Roboto, "Apple SD Gothic Neo", "Noto Sans KR", "PingFang SC",
+        "Microsoft YaHei", sans-serif;
+  letter-spacing: -0.01em;
   -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
   /* The page itself never scrolls; each view scrolls inside the shell.
      A scrolling document is what made a focused input jump to the top of the
      transcript: the browser scrolls the nearest scrollable ancestor to reveal
@@ -51,7 +79,8 @@ body {
   overscroll-behavior: none;
 }
 
-button { font: inherit; color: inherit; }
+button { font: inherit; color: inherit; letter-spacing: inherit; }
+button:active { opacity: .92; }
 
 .sprite { display: none; }
 
@@ -67,7 +96,7 @@ button { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 0;
+  background: var(--bg);
 }
 
 /* Every view is its own scroll container. The old layout let the document
@@ -79,7 +108,7 @@ button { font: inherit; color: inherit; }
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 18px 16px 10px;
+  padding: 8px 20px 16px;
 }
 .view[hidden] { display: none !important; }
 
@@ -87,175 +116,184 @@ button { font: inherit; color: inherit; }
 
 .masthead {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 6px 2px 14px;
+  gap: 12px;
+  padding: 10px 0 10px;
 }
 .masthead h1 {
   margin: 0;
-  font-size: 1.55rem;
+  font-size: 1.38rem;
   font-weight: 700;
-  letter-spacing: -.01em;
+  letter-spacing: -0.03em;
 }
 .stamp {
   margin: 0;
-  font-size: .68rem;
-  color: var(--ink-faint);
+  font-size: 0.7rem;
+  color: var(--ink-4);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+/* The build stamp is a diagnostic, not a feature. It belongs at the foot of the
+   screen the way a version number does, not in the title bar where it reads as
+   debug output. */
+.view > .stamp {
+  display: block;
+  margin: 18px 0 0;
+  text-align: center;
 }
 
 /* ---------- status: the one thing the house has to say ---------- */
 
+/* A line, not a tile. Everything on this screen was a rounded grey rectangle of
+   the same size, which is why nothing led; the status is now the only text-only
+   row, and the dot is the only thing that changes colour. */
 .status {
   display: flex;
   align-items: center;
-  gap: 14px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  padding: 18px;
-  box-shadow: var(--shadow);
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 0 2px 0;
 }
-.status-icon {
-  width: 40px;
-  height: 40px;
+.status::before {
+  content: "";
+  width: 9px;
+  height: 9px;
   flex: 0 0 auto;
-  padding: 8px;
   border-radius: 50%;
-  background: var(--green-bg);
-  fill: none;
-  stroke: var(--green);
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  background: var(--green);
 }
-.status[data-tone="ask"] .status-icon { background: var(--amber-bg); stroke: var(--amber); }
+.status[data-tone="ask"]::before { background: var(--amber); }
 .status strong {
-  display: block;
-  font-size: 1.2rem;
-  font-weight: 650;
-  line-height: 1.25;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
 }
+.status[data-tone="ask"] strong { color: var(--amber); }
 .status span {
-  display: block;
-  margin-top: 2px;
-  font-size: .82rem;
-  color: var(--ink-dim);
+  font-size: 0.86rem;
+  color: var(--ink-3);
+  line-height: 1.4;
 }
 
 /* ---------- the ask: Tier-2, waiting for an answer ---------- */
 
-/* The house's last answer, kept on screen until the next one. A reply that
-   disappears after 2.6 s is not an answer for someone who reads slowly. */
-.reply {
-  margin-top: 14px;
-  background: #eef4ff;
-  border: 2px solid #b9d2f7;
-  border-radius: 22px;
-  padding: 18px;
-}
-.reply-kicker {
-  margin: 0 0 8px;
-  font-size: .78rem;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--blue-ink);
-}
-.reply-text {
-  margin: 0;
-  font-size: 1.32rem;
-  font-weight: 600;
-  line-height: 1.42;
-  white-space: pre-line;
-}
-.reply.pending .reply-text {
-  color: var(--ink-dim);
-  font-weight: 500;
-  font-style: italic;
-}
-
-/* A placeholder in the chat log while the agent is working. */
-.msg.pending {
-  opacity: .55;
-  font-style: italic;
-}
-
 .ask {
-  margin-top: 14px;
-  background: var(--amber-bg);
-  border: 2px solid #eec97e;
-  border-radius: 22px;
-  padding: 20px 18px;
+  margin-top: 12px;
+  background: var(--amber-weak);
+  border: 1.5px solid var(--amber-line);
+  border-radius: var(--radius-block);
+  padding: 18px 16px 16px;
 }
 .ask-kicker {
-  margin: 0 0 6px;
-  font-size: .78rem;
+  margin: 0 0 8px;
+  font-size: 0.82rem;
   font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
   color: var(--amber);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.ask-kicker::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
 }
 .ask-question {
   margin: 0 0 16px;
-  font-size: 1.22rem;
-  font-weight: 650;
-  line-height: 1.35;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.42;
+  letter-spacing: -0.02em;
 }
 .ask-answers {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 10px;
 }
 .answer {
-  min-height: 76px;
-  border-radius: 18px;
-  border: 2px solid transparent;
+  min-height: 72px;
+  border-radius: var(--radius-control);
+  border: 1.5px solid transparent;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
   cursor: pointer;
   font-weight: 700;
 }
 .answer svg {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.answer span { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
-.answer small { font-size: .68rem; font-weight: 600; opacity: .75; }
+.answer span { display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
+.answer small { font-size: 0.72rem; font-weight: 600; opacity: .8; }
 .answer.yes { background: var(--green); color: #fff; }
-.answer.no { background: var(--card); color: var(--red); border-color: var(--red); }
-.answer:active { transform: scale(.98); }
+.answer.no { background: #fff; color: var(--red); border-color: var(--red); }
 .ask-clock {
   margin: 12px 0 0;
   text-align: center;
-  font-size: .8rem;
+  font-size: 0.8rem;
   color: var(--amber);
   font-variant-numeric: tabular-nums;
 }
 
+/* The house's last answer, kept on screen until the next one. A reply that
+   disappears after 2.6 s is not an answer for someone who reads slowly. */
+.reply {
+  margin-top: 12px;
+  background: var(--accent-weak);
+  border-radius: var(--radius-block);
+  padding: 16px;
+}
+.reply-kicker {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+.reply-text {
+  margin: 0;
+  font-size: 1.12rem;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -0.02em;
+  white-space: pre-line;
+}
+.reply.pending .reply-text {
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+/* A placeholder in the chat log while the agent is working. */
+.msg.pending { opacity: .55; font-style: italic; }
+
 /* ---------- section heads ---------- */
 
+/* A label, not a heading. The old version set these at 1.02rem bold, which put
+   four competing titles on one screen; a shipped app gives the group a quiet
+   caption and lets the content carry the weight. */
 .sec-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  padding: 22px 4px 10px;
+  padding: 20px 0 8px;
 }
 .sec-head h2 {
   margin: 0;
-  font-size: 1.02rem;
-  font-weight: 700;
-  color: var(--ink-dim);
-  letter-spacing: .01em;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-3);
+  letter-spacing: 0;
 }
 
 /* ---------- quick actions ---------- */
@@ -263,176 +301,191 @@ button { font: inherit; color: inherit; }
 .quick {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 .quick button {
-  min-height: 84px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  box-shadow: var(--shadow);
+  min-height: 74px;
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius-block);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 6px;
   cursor: pointer;
-  font-size: .8rem;
+  font-size: 0.84rem;
   font-weight: 600;
   text-align: center;
   padding: 8px 6px;
+  letter-spacing: -0.01em;
 }
 .quick button svg {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   fill: none;
-  stroke: var(--blue);
-  stroke-width: 1.8;
+  stroke: var(--ink-2);
+  stroke-width: 1.9;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.quick button:active { background: #eef4ff; }
+.quick button:active { background: var(--surface-press); }
 
 /* ---------- rooms ---------- */
 
 .rooms {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 8px;
 }
 .room {
-  background: var(--card);
-  border: 1.5px solid var(--line);
-  border-radius: 20px;
-  padding: 14px;
+  background: var(--surface);
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-block);
+  padding: 13px 15px;
   cursor: pointer;
   text-align: left;
-  min-height: 118px;
+  min-height: 106px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
 }
-.room.active { border-color: var(--blue); background: #f2f7ff; }
+.room.active {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+}
 .room h3 {
   margin: 0;
-  font-size: .95rem;
-  font-weight: 700;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  letter-spacing: -0.01em;
 }
 .room .temp {
-  font-size: 2rem;
+  font-size: 1.95rem;
   font-weight: 700;
-  line-height: 1;
+  line-height: 1.05;
+  letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
 }
 .room .meta {
-  font-size: .78rem;
-  color: var(--ink-dim);
+  font-size: 0.78rem;
+  color: var(--ink-3);
   display: flex;
-  gap: 10px;
+  gap: 5px;
   align-items: center;
+  letter-spacing: 0;
 }
 .room .meta svg {
-  width: 14px; height: 14px;
-  fill: none; stroke: var(--ink-dim);
+  width: 13px; height: 13px;
+  fill: none; stroke: var(--ink-4);
   stroke-width: 2; stroke-linecap: round;
 }
+.room .meta span { color: var(--ink-4); }
 
 /* ---------- devices ---------- */
 
-.devices {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+/* Rows divided by a hairline, not cards stacked with gaps. The gap version put
+   nine rounded boxes on one screen and every one of them shouted equally; this
+   reads as one list of things, which is what it is. */
+.devices { display: block; }
 .device {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  padding: 14px 16px;
   display: flex;
   align-items: center;
   gap: 14px;
-  box-shadow: var(--shadow);
+  padding: 13px 2px;
+  border-bottom: 1px solid var(--line);
 }
+.device:last-child { border-bottom: 0; }
 .device .dev-icon {
-  width: 46px;
-  height: 46px;
+  width: 44px;
+  height: 44px;
   flex: 0 0 auto;
   padding: 10px;
-  border-radius: 14px;
-  background: #eef1f5;
+  border-radius: 12px;
+  background: var(--surface);
   fill: none;
-  stroke: var(--ink-dim);
-  stroke-width: 1.6;
+  stroke: var(--ink-3);
+  stroke-width: 1.7;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.device.on .dev-icon { background: #e3effe; stroke: var(--blue-ink); }
+.device.on .dev-icon { background: var(--accent-weak); stroke: var(--accent-ink); }
 .device .dev-text { flex: 1; min-width: 0; }
 .device h3 {
   margin: 0;
-  font-size: 1.02rem;
-  font-weight: 650;
+  font-size: 0.98rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 .device p {
   margin: 2px 0 0;
-  font-size: .82rem;
-  color: var(--ink-dim);
+  font-size: 0.82rem;
+  color: var(--ink-3);
+  letter-spacing: 0;
 }
 .device .pwr {
-  width: 60px;
-  height: 60px;
+  width: 52px;
+  height: 52px;
   flex: 0 0 auto;
   border-radius: 50%;
-  border: 2px solid var(--line);
-  background: #f4f5f7;
+  border: 1.5px solid var(--line-strong);
+  background: transparent;
   display: grid;
   place-items: center;
   cursor: pointer;
 }
 .device .pwr svg {
-  width: 24px; height: 24px;
-  fill: none; stroke: var(--ink-dim);
+  width: 21px; height: 21px;
+  fill: none; stroke: var(--ink-3);
   stroke-width: 2; stroke-linecap: round;
 }
-.device.on .pwr { background: var(--blue); border-color: var(--blue); }
+.device.on .pwr { background: var(--accent); border-color: var(--accent); }
 .device.on .pwr svg { stroke: #fff; }
-.device.offline { opacity: .55; }
+.device.offline { opacity: .5; }
 
 /* ---------- schedule ---------- */
 
-.jobs {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+.jobs { display: block; }
 .job {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  padding: 14px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
+  padding: 14px 2px;
+  border-bottom: 1px solid var(--line);
 }
+.job:last-child { border-bottom: 0; }
 .job .job-main { flex: 1; min-width: 0; }
-.job strong { display: block; font-size: .98rem; font-weight: 650; }
-.job span { font-size: .8rem; color: var(--ink-dim); }
-.job .del {
-  width: 48px; height: 48px;
-  border: 0; border-radius: 14px;
-  background: var(--red-bg); color: var(--red);
-  font-size: 1.3rem; cursor: pointer;
+.job strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
-.job.disabled { opacity: .55; }
+.job span {
+  font-size: 0.8rem;
+  color: var(--ink-3);
+  letter-spacing: 0;
+}
+.job .del {
+  width: 44px; height: 44px;
+  flex: 0 0 auto;
+  border: 0; border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-3);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.job .del:active { background: var(--red-weak); color: var(--red); }
+.job.disabled { opacity: .5; }
+
 .empty {
-  background: var(--card);
-  border: 1px dashed var(--line);
-  border-radius: 18px;
-  padding: 22px 16px;
+  padding: 40px 16px;
   text-align: center;
-  color: var(--ink-dim);
-  font-size: .9rem;
+  color: var(--ink-3);
+  font-size: 0.9rem;
+  line-height: 1.6;
   margin: 0;
 }
 
@@ -443,54 +496,70 @@ button { font: inherit; color: inherit; }
   align-items: center;
   gap: 8px;
 }
+/* Title on one line, controls on the next. Side by side, the three of them do not
+   fit in 390px and "Read aloud" breaks across two lines. */
+#view-assistant .masthead {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding-bottom: 12px;
+}
 .mode-switch {
   display: flex;
   padding: 3px;
   border-radius: 999px;
-  background: #e9e6de;
+  background: var(--surface);
 }
 .mode-switch button {
   border: 0;
   background: none;
   border-radius: 999px;
-  padding: 7px 13px;
-  font-size: .78rem;
-  font-weight: 650;
-  color: var(--ink-dim);
+  padding: 6px 13px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-3);
   cursor: pointer;
 }
-.mode-switch button.active { background: var(--card); color: var(--ink); box-shadow: var(--shadow); }
+.mode-switch button.active {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(25, 31, 40, .08);
+}
 .mode-note {
   margin: 0 0 10px;
-  font-size: .78rem;
-  color: var(--ink-faint);
+  font-size: 0.78rem;
+  color: var(--ink-4);
   padding: 0 2px;
 }
 .tts {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  border: 1.5px solid var(--line);
-  background: var(--card);
+  gap: 5px;
+  border: 1.5px solid var(--line-strong);
+  background: #fff;
   border-radius: 999px;
-  padding: 7px 13px;
-  font-size: .78rem;
-  font-weight: 650;
-  color: var(--ink-dim);
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-3);
   cursor: pointer;
 }
 .tts svg {
-  width: 16px; height: 16px;
+  width: 15px; height: 15px;
   fill: none; stroke: currentColor;
   stroke-width: 1.8; stroke-linecap: round;
 }
-.tts.active { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+.tts.active {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  background: var(--accent-weak);
+}
 
 .chat {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 4px 2px 12px;
+  gap: 8px;
+  padding: 4px 0 12px;
 }
 
 /* The assistant is the one view that must not scroll as a whole: the
@@ -509,71 +578,74 @@ button { font: inherit; color: inherit; }
   -webkit-overflow-scrolling: touch;
 }
 #view-assistant .chips { flex: 0 0 auto; }
+
 .msg {
-  max-width: 86%;
-  padding: 13px 16px;
-  border-radius: 20px;
-  font-size: 1rem;
-  line-height: 1.45;
+  max-width: 84%;
+  padding: 12px 15px;
+  border-radius: 16px;
+  font-size: 0.98rem;
+  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  letter-spacing: -0.01em;
 }
 .msg.user {
   align-self: flex-end;
-  background: var(--blue);
+  background: var(--accent);
   color: #fff;
-  border-bottom-right-radius: 6px;
+  border-bottom-right-radius: 5px;
 }
 .msg.assistant, .msg.system {
   align-self: flex-start;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-bottom-left-radius: 6px;
+  background: var(--surface);
+  border-bottom-left-radius: 5px;
 }
-.msg.system { background: var(--amber-bg); border-color: #eec97e; }
+.msg.system { background: var(--amber-weak); }
 .msg .stamp {
   display: block;
-  margin-top: 6px;
-  font-size: .66rem;
-  color: var(--ink-faint);
+  margin-top: 5px;
+  font-size: 0.68rem;
+  color: var(--ink-4);
+  letter-spacing: 0;
 }
-.msg.user .stamp { color: rgba(255, 255, 255, .7); }
+.msg.user .stamp { color: rgba(255, 255, 255, .72); }
 .msg details {
   margin-top: 8px;
-  border-top: 1px dashed var(--line);
+  border-top: 1px solid rgba(25, 31, 40, .08);
   padding-top: 6px;
 }
 .msg summary {
-  font-size: .74rem;
-  color: var(--ink-dim);
+  font-size: 0.74rem;
+  color: var(--ink-3);
   cursor: pointer;
 }
 .msg details ol {
   margin: 8px 0 0;
-  padding-left: 20px;
-  font-size: .8rem;
-  color: var(--ink-dim);
+  padding-left: 18px;
+  font-size: 0.78rem;
+  color: var(--ink-3);
 }
 .msg details li { margin-bottom: 4px; }
-.msg details li.offer { list-style: "💬 "; }
+.msg details li.offer { list-style: "▸ "; }
 
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 4px 0 8px;
+  gap: 7px;
+  padding: 4px 0 10px;
 }
 .chips button {
-  border: 1.5px solid var(--line);
-  background: var(--card);
+  border: 1.5px solid var(--line-strong);
+  background: #fff;
   border-radius: 999px;
-  padding: 9px 15px;
-  font-size: .82rem;
+  min-height: 42px;
+  padding: 0 15px;
+  font-size: 0.82rem;
   font-weight: 600;
-  color: var(--ink-dim);
+  color: var(--ink-2);
   cursor: pointer;
 }
-.chips button:active { background: #eef4ff; }
+.chips button:active { background: var(--surface); }
 
 /* ---------- talk bar (permanent) ---------- */
 
@@ -581,34 +653,36 @@ button { font: inherit; color: inherit; }
   flex: 0 0 auto;
   background: var(--bg);
   border-top: 1px solid var(--line);
-  padding: 10px 16px 12px;
+  padding: 10px 20px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
+/* The one loud control in the app. A glow under it is what made it look like a
+   marketing button; a flat fill at this size is louder anyway. */
 .talk {
-  min-height: 62px;
+  min-height: 56px;
   border: 0;
-  border-radius: 20px;
-  background: var(--blue);
+  border-radius: var(--radius-control);
+  background: var(--accent);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  font-size: 1.15rem;
+  gap: 9px;
+  font-size: 1.02rem;
   font-weight: 700;
+  letter-spacing: -0.01em;
   cursor: pointer;
-  box-shadow: 0 6px 18px rgba(31, 111, 235, .32);
 }
 .talk svg {
-  width: 28px; height: 28px;
+  width: 22px; height: 22px;
   fill: none; stroke: currentColor;
-  stroke-width: 2; stroke-linecap: round;
+  stroke-width: 2.1; stroke-linecap: round;
 }
-.talk span { display: flex; align-items: baseline; gap: 8px; }
-.talk small { font-size: .8rem; font-weight: 600; opacity: .85; }
-.talk.listening { background: var(--red); box-shadow: 0 6px 18px rgba(198, 40, 40, .32); }
+.talk span { display: flex; align-items: baseline; gap: 7px; }
+.talk small { font-size: 0.8rem; font-weight: 600; opacity: .78; }
+.talk.listening { background: var(--red); }
 
 .composer {
   display: flex;
@@ -617,37 +691,39 @@ button { font: inherit; color: inherit; }
 .composer input {
   flex: 1;
   min-width: 0;
-  background: var(--card);
-  border: 1.5px solid var(--line);
-  border-radius: 18px;
-  padding: 13px 16px;
+  background: var(--surface);
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-control);
+  padding: 0 15px;
+  min-height: 50px;
   color: var(--ink);
   font: inherit;
-  font-size: 1rem;
+  font-size: 0.95rem;
   outline: none;
 }
-.composer input:focus { border-color: var(--blue); }
+.composer input::placeholder { color: var(--ink-4); }
+.composer input:focus { border-color: var(--accent); background: #fff; }
 .composer .lang {
-  min-width: 52px;
-  border: 1.5px solid var(--line);
-  background: var(--card);
-  border-radius: 18px;
-  font-size: .8rem;
+  min-width: 50px;
+  border: 0;
+  background: var(--surface);
+  border-radius: var(--radius-control);
+  font-size: 0.8rem;
   font-weight: 700;
-  color: var(--ink-dim);
+  color: var(--ink-3);
   cursor: pointer;
 }
 .composer .send {
-  width: 54px;
+  width: 50px;
   border: 0;
-  border-radius: 18px;
-  background: var(--blue);
+  border-radius: var(--radius-control);
+  background: var(--accent);
   display: grid;
   place-items: center;
   cursor: pointer;
 }
 .composer .send svg {
-  width: 22px; height: 22px;
+  width: 20px; height: 20px;
   fill: none; stroke: #fff;
   stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
 }
@@ -658,48 +734,50 @@ button { font: inherit; color: inherit; }
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  background: var(--card);
+  background: var(--bg);
   border-top: 1px solid var(--line);
   padding-bottom: env(safe-area-inset-bottom);
 }
 .tabbar .tab {
   border: 0;
   background: none;
-  min-height: 72px;
+  min-height: 62px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  font-size: .76rem;
-  font-weight: 650;
-  color: var(--ink-faint);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-4);
   cursor: pointer;
+  letter-spacing: 0;
 }
 .tabbar .tab svg {
-  width: 26px; height: 26px;
+  width: 24px; height: 24px;
   fill: none; stroke: currentColor;
-  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+  stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round;
 }
-.tabbar .tab.active { color: var(--blue-ink); }
+.tabbar .tab.active { color: var(--ink); }
 
 /* ---------- toast ---------- */
 
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(160px + env(safe-area-inset-bottom));
+  bottom: calc(150px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   background: var(--ink);
   color: #fff;
-  border-radius: 16px;
-  padding: 14px 22px;
-  font-size: 1.05rem;
+  border-radius: 12px;
+  padding: 13px 20px;
+  font-size: 0.95rem;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.45;
   z-index: 40;
   max-width: 86%;
   text-align: center;
+  box-shadow: 0 8px 24px rgba(25, 31, 40, .18);
 }
 
 /* ---------- device sheet ---------- */
@@ -707,7 +785,7 @@ button { font: inherit; color: inherit; }
 .sheet-scrim {
   position: fixed;
   inset: 0;
-  background: rgba(23, 32, 42, .38);
+  background: rgba(25, 31, 40, .42);
   z-index: 50;
 }
 .sheet {
@@ -715,66 +793,82 @@ button { font: inherit; color: inherit; }
   left: 0; right: 0; bottom: 0;
   max-width: 600px;
   margin: 0 auto;
-  background: var(--card);
-  border-radius: 26px 26px 0 0;
-  padding: 10px 20px calc(26px + env(safe-area-inset-bottom));
+  background: var(--bg);
+  border-radius: 20px 20px 0 0;
+  padding: 10px 20px calc(24px + env(safe-area-inset-bottom));
   z-index: 51;
+  box-shadow: 0 -8px 32px rgba(25, 31, 40, .16);
 }
 .sheet-grip {
-  width: 44px; height: 5px;
-  border-radius: 3px;
-  background: var(--line);
-  margin: 4px auto 14px;
+  width: 40px; height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  margin: 4px auto 16px;
 }
-.sheet h2 { margin: 0; font-size: 1.3rem; }
-.sheet .sub { margin: 2px 0 18px; color: var(--ink-dim); font-size: .85rem; }
+.sheet h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.sheet .sub {
+  margin: 3px 0 20px;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  letter-spacing: 0;
+}
 .stepper {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 22px;
-  margin: 6px 0 16px;
+  margin: 6px 0 18px;
 }
 .stepper button {
-  width: 64px; height: 64px;
+  width: 60px; height: 60px;
   border-radius: 50%;
-  border: 1.5px solid var(--line);
-  background: var(--card);
-  font-size: 1.7rem;
+  border: 1.5px solid var(--line-strong);
+  background: #fff;
+  font-size: 1.6rem;
   cursor: pointer;
 }
 .stepper .target {
-  font-size: 2.1rem;
+  font-size: 2rem;
   font-weight: 700;
   min-width: 110px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
 }
 .pills {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   justify-content: center;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 .pills button {
-  min-height: 52px;
+  min-height: 50px;
   padding: 0 20px;
-  border-radius: 16px;
-  border: 1.5px solid var(--line);
-  background: var(--card);
-  font-weight: 650;
+  border-radius: var(--radius-control);
+  border: 1.5px solid var(--line-strong);
+  background: #fff;
+  font-weight: 600;
   cursor: pointer;
 }
-.pills button.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+.pills button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 .sheet-power {
   width: 100%;
-  min-height: 62px;
+  min-height: 56px;
   border: 0;
-  border-radius: 18px;
-  background: var(--blue);
+  border-radius: var(--radius-control);
+  background: var(--accent);
   color: #fff;
-  font-size: 1.05rem;
+  font-size: 1rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -783,8 +877,8 @@ button { font: inherit; color: inherit; }
 /* ---------- wide screens: keep the phone frame honest ---------- */
 
 @media (min-width: 640px) {
-  body { background: #ece8df; }
-  .app, .tabbar, .talkbar, .sheet {
+  body { background: var(--surface); }
+  .app {
     border-left: 1px solid var(--line);
     border-right: 1px solid var(--line);
   }
@@ -793,7 +887,7 @@ button { font: inherit; color: inherit; }
 /* A laptop or a projector is the same audience, so the frame gets wider and
    everything gets bigger — not just more space to fill. */
 @media (min-width: 1000px) {
-  html { font-size: 22px; }
-  .app, .talkbar, .tabbar, .sheet { max-width: 780px; }
+  html { font-size: 21px; }
+  .app, .sheet { max-width: 780px; }
   .toast { max-width: 66%; }
 }

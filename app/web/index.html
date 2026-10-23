@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#f6f4ef">
+<meta name="theme-color" content="#ffffff">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Home Agent</title>
@@ -87,16 +87,13 @@
   <section class="view" id="view-home">
     <header class="masthead">
       <h1>My Home</h1>
-      <p class="stamp" id="stamp"></p>
     </header>
 
-    <!-- The one thing the house has to say, in plain words. -->
+    <!-- The one thing the house has to say, in plain words. A line, not a card:
+         when every block on the screen is a rounded tile, nothing leads. -->
     <div class="status" id="status">
-      <svg class="status-icon" viewBox="0 0 24 24"><use href="#i-home"/></svg>
-      <div>
-        <strong id="statusLine">Everything is fine.</strong>
-        <span id="statusDetail"></span>
-      </div>
+      <strong id="statusLine">Everything is fine.</strong>
+      <span id="statusDetail"></span>
     </div>
 
     <!-- The house's last answer, kept on screen. A reply that vanishes after
@@ -134,6 +131,10 @@
       <h2 id="deviceHead">Devices</h2>
     </div>
     <div class="devices" id="devices"></div>
+
+    <!-- Which process answered. A version number belongs at the foot of the
+         screen, not in the title bar where it reads as debug output. -->
+    <p class="stamp" id="stamp"></p>
   </section>
 
   <!-- ================= SCHEDULE ================= -->

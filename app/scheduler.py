@@ -68,7 +68,7 @@ class Scheduler:
             db.log("scheduler.catchup", f"{missed} overdue job(s) handled")
             db.add_message(
                 "system",
-                f"\u23f1 {missed} scheduled task(s) came due while the agent was "
+                f"{missed} scheduled task(s) came due while the agent was "
                 f"offline. Nothing was fired late \u2014 one-time tasks were closed "
                 f"out as missed and recurring ones moved to their next slot.",
                 {"catchup": missed},
