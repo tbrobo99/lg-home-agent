@@ -11,8 +11,8 @@ actually matters — worst case is a slightly dry room or a fan running for
 nothing, never a ruined garment or a delayed meal.
 
 Tier 2 (approval required): anything that moves a *schedule* or touches a
-*heating* appliance. Delaying the dryer, rescheduling the washer, pre-heating
-a cooktop. These change what the user planned, so the user decides.
+*heating* appliance. Delaying the dryer and restarting it off-peak is the
+realised case: it changes what the user planned, so the user decides.
 
 `candidates()` turns a risk into the actions worth considering. It deliberately
 produces a *set*, not a plan: the decision layer chooses among these, in the
@@ -27,14 +27,21 @@ TIER2 = "tier2"
 
 # The whitelist. An action kind that is not in this table does not exist as far
 # as the policy layer is concerned — nothing downstream can invent one.
+#
+# The table is exactly what `candidates()` can produce, and a test enforces
+# that: an entry no rule ever proposes is a capability the code claims and does
+# not have. Two earlier entries were removed for that reason —
+# `reschedule_washer` and `preheat_cooktop`. The proposal names "delaying a
+# laundry cycle or warming up cooktops" as *examples* of Tier-2 work, not as
+# required actions; the realised schedule shift is `delay_dryer`, and there is
+# no cooktop in the appliance set to warm. Adding either back is a feature, and
+# it starts here.
 ACTION_TIERS: dict[str, str] = {
     "ventilate_washer": TIER1,
     "dehumidifier_on": TIER1,
     "purifier_on": TIER1,
     "ventilate_kitchen": TIER1,
     "delay_dryer": TIER2,
-    "reschedule_washer": TIER2,
-    "preheat_cooktop": TIER2,
 }
 
 # How long a Tier-2 request waits before the fail-safe timeout (poster §II.E).
@@ -49,6 +56,9 @@ class Candidate:
     actions: list[dict]
     label: str            # one line, shown to the user and the LLM
     tier: str = ""
+    # Past-tense form for the report the user reads *after* the action ran:
+    # "I started drum micro-ventilation", not "I start drum micro-ventilation".
+    done: str = ""
     # For Tier-2 schedule shifts: the job to create if the user confirms.
     job: dict | None = None
     reason: str = ""      # why the rule proposed it — evidence, not decoration
@@ -56,6 +66,8 @@ class Candidate:
     def __post_init__(self) -> None:
         if not self.tier:
             self.tier = tier_of(self.kind)
+        if not self.done:
+            self.done = self.label
 
 
 def tier_of(kind: str) -> str:
@@ -77,6 +89,7 @@ def candidates(risk, snapshot: dict) -> list[Candidate]:
                 device_name="Balcony Washer",
                 actions=[{"action": "ventilate", "value": True}],
                 label="start drum micro-ventilation on the washer",
+                done="started drum micro-ventilation on the washer",
                 reason=f"drum at {risk.current:.0f}% humidity, sealed {risk.drivers.get('sealed_hours', 0):.1f} h",
             ))
         balcony = rooms.get("Balcony", {}).get("humidity", 60)
@@ -87,7 +100,22 @@ def candidates(risk, snapshot: dict) -> list[Candidate]:
                 device_name="Balcony Dehumidifier",
                 actions=[{"action": "power", "value": True}],
                 label="turn on the balcony dehumidifier",
+                done="turned on the balcony dehumidifier",
                 reason=f"balcony humidity {balcony:.0f}%",
+            ))
+        # A damp drum is also an airborne problem: the flat breathes what the
+        # balcony grows. The purifier is the cheapest reversible answer, and
+        # the proposal names it explicitly as a Tier-1 action.
+        if not ap.get("purifier", {}).get("power"):
+            out.append(Candidate(
+                kind="purifier_on",
+                device_id="purifier",
+                device_name="Living Room Purifier",
+                actions=[{"action": "power", "value": True}],
+                label="turn on the living room air purifier to catch mould spores",
+                done="turned on the living room air purifier",
+                reason=(f"mould risk {risk.score:.0f}/100; a wet drum that has been "
+                        f"sealed for hours is shedding spores into the flat"),
             ))
 
     elif risk.kind == "thermal":
@@ -97,7 +125,8 @@ def candidates(risk, snapshot: dict) -> list[Candidate]:
                 device_id="dryer",
                 device_name="Balcony Dryer",
                 actions=[{"action": "power", "value": False}],
-                label="turn the dryer off now and restart it at 23:00 off-peak",
+                label="turn the dryer off now and restart it at 11 PM tonight",
+                done="turned the dryer off and set it to restart at 11 PM",
                 tier=TIER2,
                 job={"device_id": "dryer",
                      "actions": [{"action": "power", "value": True}],
@@ -116,6 +145,7 @@ def candidates(risk, snapshot: dict) -> list[Candidate]:
                 actions=[{"action": "power", "value": True},
                          {"action": "fan", "value": "high"}],
                 label="turn on the kitchen range hood to exhaust the heat",
+                done="turned on the kitchen range hood to pull the heat out",
                 reason=(f"fridge compressor at "
                         f"{snapshot['appliances'].get('fridge', {}).get('duty_cycle', 0):.0%} duty, "
                         f"predicted {risk.predicted:.1f}\u00b0C in "
