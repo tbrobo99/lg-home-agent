@@ -35,9 +35,20 @@ from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+# The repository root. Two levels up from app/sensors.py — this was three, which
+# put the generated sensor files in the *parent* of the repo while the SQLite
+# database stayed in data/. Both live in <repo>/data now, which is what the
+# module docstring and NFR III.B both claim.
+ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("DATA_DIR") or (ROOT / "data"))
 SENSOR_DIR = DATA_DIR / "sensors"
+
+# NFR III.B: calendar *inputs* are a local file too, not a live account. The
+# file is a JSON array of {"title", "start", "end"}; `start` is ISO 8601. The
+# thermal index reads it to treat an oven scheduled within the next half hour
+# as load that has not arrived yet — which is the only moment ventilating
+# ahead of time is worth doing.
+CALENDAR_FILE = DATA_DIR / "calendar.json"
 
 ROOMS = ("Living Room", "Kitchen", "Bedroom", "Balcony")
 
@@ -83,6 +94,10 @@ class SensorSimulator:
             "oven": {"power": False, "target_temp": 180},
             "dehumidifier": {"power": False},
             "range_hood": {"power": False, "fan": "auto"},
+            # The purifier draws nothing worth counting as heat, but its state
+            # is a sensor fact like any other: the mold branch proposes it when
+            # spores are the problem, and the loop must not propose it twice.
+            "purifier": {"power": False, "fan": "auto"},
             # The fridge is the kitchen's sensor node: what its external probe
             # reads and how hard its compressor works. duty_cycle is derived
             # from external_temp, exactly as the real appliance's draw tracks
@@ -91,7 +106,7 @@ class SensorSimulator:
         }
         self.ac_targets: dict[str, dict] = {}  # room -> {"target_temp", "mode", "power"}
         self.occupancy = {"user_home": True}
-        self.calendar: list[dict] = []
+        self.calendar: list[dict] = self._load_calendar()
 
         # (timestamp, value) per signal, for the trend extrapolation in risk.py
         self.history: dict[str, deque] = {
@@ -248,6 +263,40 @@ class SensorSimulator:
                 elif device_id == "oven" and name == "temperature":
                     self.appliances["oven"]["target_temp"] = value
 
+    # ---------------------------------------------------------------- calendar
+
+    @staticmethod
+    def _load_calendar(path: Path | None = None) -> list[dict]:
+        """Read the day's appointments from the local JSON file.
+
+        A missing or malformed file is an empty day, not a crash: the house
+        must keep working when a fixture is wrong, and a calendar that cannot
+        be read is the same as a calendar with nothing on it.
+        """
+        p = Path(path) if path is not None else CALENDAR_FILE
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        if not isinstance(raw, list):
+            return []
+        out = []
+        for entry in raw:
+            if not isinstance(entry, dict) or not entry.get("start"):
+                continue
+            out.append({
+                "title": str(entry.get("title") or "appointment"),
+                "start": str(entry["start"]),
+                "end": str(entry.get("end") or ""),
+            })
+        return out
+
+    def reload_calendar(self) -> list[dict]:
+        """Re-read the file, so a demo can edit the day without a restart."""
+        with self._lock:
+            self.calendar = self._load_calendar()
+            return list(self.calendar)
+
     # ---------------------------------------------------------------- scenarios
 
     def apply_scenario(self, name: str, now: datetime | None = None) -> None:
@@ -267,10 +316,13 @@ class SensorSimulator:
                 "oven": {"power": False, "target_temp": 180},
                 "dehumidifier": {"power": False},
                 "range_hood": {"power": False, "fan": "auto"},
+                "purifier": {"power": False, "fan": "auto"},
                 "fridge": {"power": True, "external_temp": 29.0, "duty_cycle": 0.35},
             }
             self.ac_targets.clear()
-            self.calendar = []
+            # Scenarios start from the real day and then override it. A demo
+            # fixture is still a fixture, but the baseline is the file.
+            self.calendar = self._load_calendar()
             self.occupancy = {"user_home": True}
 
             if name == "mold":
