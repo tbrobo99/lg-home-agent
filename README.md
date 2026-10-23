@@ -1,3 +1,10 @@
+> **Archived — this is the Phase 1 prototype.**
+> Phase 2 continues at
+> [tbrobo99/proactive-senior-care-comfort-agent](https://github.com/tbrobo99/proactive-senior-care-comfort-agent),
+> which carries this history forward and adds the specification, the risk model
+> and the proactive engine. This repository stays public and read-only as the
+> record of the conversational prototype it was.
+
 # LG Smart Home Conversational Agent
 
 ![tests](https://github.com/tbrobo99/lg-home-conversational-agent/actions/workflows/tests.yml/badge.svg)
