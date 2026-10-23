@@ -78,6 +78,53 @@ It understands times as people actually say them: `10:30 pm`, `at 7 am tomorrow`
 
 ---
 
+## Phase 2 — the house watches itself
+
+Phase 1 answers when spoken to. Phase 2 watches: a once-a-second loop reads
+simulated IoT sensors, scores two risk indices, and intervenes — under a safety
+rule that says a machine may change the low-stakes things on its own and must
+ask before it changes anyone's plans.
+
+```
+sensors.tick → MRI / TOI → policy.candidates → DECIDE → Tier 1: act, report
+                                                    → Tier 2: ask, wait, expire
+```
+
+| Piece | File | What it owns |
+|---|---|---|
+| Sensor stream | `app/sensors.py` | rooms, drum humidity, door sensors, power draw, calendar; JSONL + CSV to `data/sensors/` |
+| MRI | `app/risk.py` | Mold Risk Index — humidity × sealed time × warmth, with a 30-minute trend extrapolation |
+| TOI | `app/risk.py` | Thermal Overload Index — heat load vs the room, plus ovens that are *scheduled* but not yet on |
+| Tiers | `app/policy.py` | the whitelist: Tier 1 (ventilate, dehumidify, pre-cool) runs alone; Tier 2 (delay, reschedule, preheat) never does |
+| Approvals | `app/approval.py` | pending → confirmed / declined / **expired**. No answer in 5 minutes is a no |
+| The loop | `app/proactive.py` | ties it together and decides what the model is allowed to decide |
+
+**Where the model sits.** The LLM is not the timer, not the sensor, and not the
+safety gate — those are deterministic code. It owns exactly what rules cannot
+express: *which* of the candidate actions to take, in *what order*, and whether
+to abstain because the trend says the drum is already drying. Its answer is
+validated against the candidate whitelist, and any parse failure falls back to
+the safe default (Tier 1 executes, Tier 2 is only proposed). It can be wrong
+about what to do; it cannot corrupt the house.
+
+**Run it:**
+
+```
+python run.py --scenario mold          # sealed wet drum, nobody home
+python run.py --scenario oven          # dryer running, bake in 20 minutes
+python run.py --scenario oven_running
+curl localhost:8848/api/proactive      # live sensor snapshot + active risks
+curl localhost:8848/api/approvals      # what the house is waiting for
+curl -X POST localhost:8848/api/approvals/<id>/confirm   # the only door into Tier 2
+```
+
+The mold scenario ends with the washer ventilating and the balcony dehumidifier
+running, unprompted. The oven scenario pre-cools the kitchen and then asks —
+*"…shall I delay the dryer to 23:00 off-peak?"* — and if nobody answers, the
+dryer keeps its schedule, which is the only honest reading of silence.
+
+---
+
 ## 2. Nine design decisions worth defending
 
 ### The language model is not the timer
