@@ -1,10 +1,20 @@
-# LG Smart Home Conversational Agent
+# Proactive Senior Care & Comfort Agent
 
-![tests](https://github.com/tbrobo99/lg-home-conversational-agent/actions/workflows/tests.yml/badge.svg)
+**Risk-graded autonomous home orchestration.** A house that watches itself: a once-a-second
+sensor loop scores two risk indices and intervenes — low-stakes actions it takes alone, and
+anything that would change someone's plans it asks about first, out loud, with a deadline.
 
-A conversational agent for a whole-home LG appliance setup. You talk to it in plain
-English, and it both acts immediately and schedules future actions — *"turn off the
-living room AC every night at 11 pm"* becomes a durable task that actually fires.
+![tests](https://github.com/tbrobo99/proactive-senior-care-comfort-agent/actions/workflows/tests.yml/badge.svg)
+
+This repository holds both phases of the project. [Phase 2](#phase-2--the-house-watches-itself)
+is what the agent is for; Phase 1, documented immediately below, is the substrate it stands on —
+the device layer, the durable scheduler, the rule-first language stack, and the phone app that
+Phase 2 reads sensors through and issues commands with.
+
+## Phase 1 — the conversational substrate
+
+You talk to it in plain English, and it both acts immediately and schedules future actions —
+*"turn off the living room AC every night at 11 pm"* becomes a durable task that actually fires.
 
 It runs in a phone browser with no framework and no build step. Over HTTPS the page
 can be added to the home screen and behaves like an app; over plain HTTP on the local
@@ -475,8 +485,8 @@ the missing slot. `cancel` / `never mind` clears it explicitly.
 No dependencies. Python 3.10+ and nothing else.
 
 ```bash
-git clone <your-repo-url> lg-home-conversational-agent
-cd lg-home-conversational-agent
+git clone <your-repo-url> proactive-senior-care-comfort-agent
+cd proactive-senior-care-comfort-agent
 python run.py
 ```
 
@@ -533,7 +543,7 @@ produces a real install behind HTTPS. See [docs/APP.md](docs/APP.md).
 ### Project structure
 
 ```
-lg-home-conversational-agent/
+proactive-senior-care-comfort-agent/
 ├── run.py                  entry point
 ├── start.bat               double-click launcher (Windows)
 ├── config.example.json     config template (config.json is git-ignored)

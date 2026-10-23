@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 cd /d %~dp0
-echo Starting LG Smart Home Agent...
+echo Starting Proactive Senior Care ^& Comfort Agent...
 python run.py
 if errorlevel 1 (
   echo.

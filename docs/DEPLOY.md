@@ -17,16 +17,16 @@ wrong host for this — pick something that stays up.
 ### Linux (systemd)
 
 ```ini
-# /etc/systemd/system/lg-home-conversational-agent.service
+# /etc/systemd/system/proactive-senior-care-comfort-agent.service
 [Unit]
-Description=LG Smart Home Agent
+Description=Proactive Senior Care & Comfort Agent
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/opt/lg-home-conversational-agent
+WorkingDirectory=/opt/proactive-senior-care-comfort-agent
 ExecStart=/usr/bin/python3 run.py
 Restart=always
 RestartSec=5
@@ -39,8 +39,8 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now lg-home-conversational-agent
-journalctl -u lg-home-conversational-agent -f
+sudo systemctl enable --now proactive-senior-care-comfort-agent
+journalctl -u proactive-senior-care-comfort-agent -f
 ```
 
 `Restart=always` is the important line: it covers crashes, and it means a reboot
@@ -173,10 +173,10 @@ enough for the agent, not enough to also run a database server or a container ru
 opkg update
 opkg install python3 python3-sqlite3
 # copy the repo over, then:
-cd /root/lg-home-conversational-agent && python3 run.py --lan --no-browser
+cd /root/proactive-senior-care-comfort-agent && python3 run.py --lan --no-browser
 ```
 
-Under `procd` (`/etc/init.d/lg-home-conversational-agent`) use `procd_set_param respawn` so the agent
+Under `procd` (`/etc/init.d/proactive-senior-care-comfort-agent`) use `procd_set_param respawn` so the agent
 comes back after a crash or a reboot, and keep `data/` on the overlay filesystem —
 `/tmp` is a RAM disk and is wiped on reboot.
 

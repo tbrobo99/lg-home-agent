@@ -101,7 +101,7 @@ def main() -> None:
     llm_txt = (f"enabled ({cfg['llm']['model']})" if cfg["llm"].get("enabled")
                else "disabled (rule engine only)")
     print("=" * 58)
-    print("  LG Smart Home Agent")
+    print("  Proactive Senior Care & Comfort Agent")
     print(f"  UI        : {local_url}")
     if args.lan:
         ip = lan_ip()
